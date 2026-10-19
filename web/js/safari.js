@@ -431,12 +431,18 @@
     window.addEventListener('keyup', function (ev) { var s = window.__safari; if (s && TECLAS[ev.key] === s.tecla) { s.tecla = null; } });
     window.addEventListener('resize', function () { K.escala(raiz); });
   }
-  raiz.onmousedown = function (ev) {
+  /* direcional na tela: eventos pointer (mouse e toque); deslizar o dedo troca de direção */
+  raiz.onpointerdown = function (ev) {
     var tc = ev.target.closest('[data-tecla]'); if (tc) { S.tecla = tc.getAttribute('data-tecla'); ev.preventDefault(); }
     var jogo = $('sf-jogo'); if (jogo && jogo.focus && ev.target.closest('#sf-jogo')) { jogo.focus(); }
   };
-  raiz.onmouseup = function () { S.tecla = null; };
-  raiz.onmouseleave = function () { S.tecla = null; };
+  raiz.onpointermove = function (ev) {
+    if (!S.tecla) { return; }
+    var el = document.elementFromPoint(ev.clientX, ev.clientY), tc = el && el.closest('[data-tecla]');
+    if (tc) { S.tecla = tc.getAttribute('data-tecla'); }
+  };
+  raiz.onpointerup = raiz.onpointercancel = raiz.onpointerleave = function () { S.tecla = null; };
+  raiz.oncontextmenu = function (ev) { if (ev.target.closest('[data-tecla]')) { ev.preventDefault(); } };
   raiz.onclick = function (ev) {
     var el = ev.target.closest('[data-acao]'); if (!el || el.classList.contains('off')) { return; }
     switch (el.getAttribute('data-acao')) {

@@ -108,7 +108,7 @@
       else {
         var t = cartas[0];
         gal += "<div class='cg'><div class='cg-lista'>" + cartas.map(function (c) {
-          return `<div class='cg-item'><img class='cg-thumb' loading='lazy' src='${c.img}'/><div class='cg-prev'><div class='holo'><img src='${c.img}'/></div>` +
+          return `<div class='cg-item' data-acao='carta' data-img='${c.img}' data-txt='${esc(c.rar + ' · ' + c.col)}'><img class='cg-thumb' loading='lazy' src='${c.img}'/><div class='cg-prev'><div class='holo'><img src='${c.img}'/></div>` +
             `<span><b>${esc(c.rar)}</b>${esc(c.col)}</span></div></div>`;
         }).join('') + `</div><div class='cg-padrao'><div class='holo'><img src='${t.img}'/></div><span><b>${esc(t.rar)}</b>${esc(t.col)}</span></div></div>`;
       }
@@ -122,11 +122,13 @@
       (p.desc ? `<div class='hero-desc'>${esc(p.desc)}</div>` : '');
     var tipos = p.t.map(function (t) { return `<span class='tp bg-${t} sh-${t}'>${esc(K.nomeTipo(t).toUpperCase())}</span>`; }).join('');
     return `<div class='hero${cls}'>${topo}<div class='hero-palco'><div class='hero-glow gl-${t1}'></div><div class='hero-anel bc-${t1}'></div>` +
-      antes + K.img(arte(p, shiny), 'hero-img') + `<div class='hero-chao'></div>${brilhos}${depois}</div>` +
+      antes + K.img(arte(p, shiny), 'hero-img') + `<div class='hero-chao'></div>${brilhos}${depois}` +
+      "<button class='hero-seta hs-ant' data-acao='ant' aria-label='Pokémon anterior'>‹</button><button class='hero-seta hs-prox' data-acao='prox' aria-label='Próximo Pokémon'>›</button></div>" +
       `<div class='hero-tipos'>${tipos}</div><div class='hero-fatos'>` +
       `<div class='fato'><span>ALTURA</span><b>${fmt(p.alt, 1)} m</b></div>` +
       `<div class='fato'><span>PESO</span><b>${fmt(p.peso, 1)} kg</b></div>` +
-      `<div class='fato'><span>TOTAL BASE</span><b>${p.total}</b></div></div></div>`;
+      `<div class='fato'><span>TOTAL BASE</span><b>${p.total}</b></div></div>` +
+      (p.desc ? `<p class='hero-desc-m'>${esc(p.desc)}</p>` : '') + '</div>';
   }
 
   function cabeca(p, titulo, extra) {
@@ -185,7 +187,7 @@
       return `<div class='ev${cls}' data-acao='evo' data-id='${m.id}' title='${esc(m.nomeEsp)}'>${seta}<div class='ev-card'>${prox ? "<span class='ev-evoluir'>EVOLUIR ›</span>" : ''}` +
         `<div class='ev-img gl-${m.t[0]}'>${K.img(gif(m, shiny), '', "loading='lazy'")}</div><span class='ev-nome'>${esc(m.nomeEsp)}</span>${nivel}</div></div>`;
     }).join('');
-    return "<div class='pn'>" + cabeca(p, 'EVOLUÇÃO', "<span class='pn-sub'>clique no próximo estágio para evoluir · de novo para voltar</span>") +
+    return "<div class='pn'>" + cabeca(p, 'EVOLUÇÃO', "<span class='pn-sub ev-dica'>clique no próximo estágio para evoluir · de novo para voltar</span>") +
       `<div class='pn-corpo'><div class='evs'>${itens}</div></div></div>`;
   }
 
@@ -216,22 +218,50 @@
   PADRAO.forEach(function (p) { if (!vistoGen[p.genLabel]) { vistoGen[p.genLabel] = 1; gens.push([p.gen, p.genLabel]); } });
   gens.sort(function (a, b) { return a[0] - b[0]; });
 
+  // no celular (html.movel) os blocos viram uma coluna e #dx-escolha (filtros + lista) vira uma tela por cima
   raiz.innerHTML = "<div class='pk-palco'>" +
     caixa('dx-fundo', 0, 0, 1280, 720, 0) + caixa('dx-marca', 24, 48, 320, 40, 2) +
+    "<button id='dx-abrir' class='dx-abrir' data-acao='abrir'><span>Buscar Pokémon</span><b id='dx-abrir-n'></b></button>" +
+    "<div id='dx-escolha'><div class='dx-escolha-topo'><b>Escolha um Pokémon</b><button class='dx-fechar' data-acao='fechar' aria-label='Fechar'>✕</button></div><div id='dx-filtros'>" +
     `<div class='dx-cx' style='left:16px;top:94px;width:118px;height:32px;z-index:3'><select id='dx-gen' class='dx-sel' aria-label='Geração'><option value=''>Geração</option>${gens.map(function (g) { return `<option value='${esc(g[1])}'>${esc(g[1])}</option>`; }).join('')}</select></div>` +
     `<div class='dx-cx' style='left:140px;top:94px;width:118px;height:32px;z-index:3'><select id='dx-tipo' class='dx-sel' aria-label='Tipo'><option value=''>Tipo</option>${K.TIPOS.map(function (t) { return `<option value='${t}'>${esc(K.nomeTipo(t))}</option>`; }).join('')}</select></div>` +
-    `<div class='dx-cx' style='left:264px;top:94px;width:84px;height:32px;z-index:3'><button id='dx-lend' class='dx-bt' style='width:100%' data-acao='lend'>★ Lendários</button></div>` +
-    `<div class='dx-cx dx-lista' style='left:16px;top:134px;width:332px;height:570px;z-index:3'><input id='dx-busca' class='dx-busca' type='search' placeholder='Pesquisar' autocomplete='off' aria-label='Pesquisar Pokémon'/><div id='dx-grade' class='dx-grade'></div></div>` +
+    `<div class='dx-cx' style='left:264px;top:94px;width:84px;height:32px;z-index:3'><button id='dx-lend' class='dx-bt' style='width:100%' data-acao='lend'>★ Lendários</button></div></div>` +
+    `<div class='dx-cx dx-lista' style='left:16px;top:134px;width:332px;height:570px;z-index:3'><input id='dx-busca' class='dx-busca' type='search' placeholder='Pesquisar' autocomplete='off' aria-label='Pesquisar Pokémon'/><div id='dx-grade' class='dx-grade'></div></div></div>` +
     caixa('dx-hero', 364, 14, 472, 462, 4) +
     `<div class='dx-cx' style='left:520px;top:18px;width:316px;height:30px;z-index:5'><div class='dx-modos' id='dx-modos'>` +
     ['Normal', '✨ Shiny', '🃏 Cartas'].map(function (m, i) { return `<button class='dx-bt' data-acao='modo' data-m='${i + 1}'>${m}</button>`; }).join('') + '</div></div>' +
     caixa('dx-evo', 360, 486, 480, 218, 4) + caixa('dx-atr', 856, 16, 408, 290, 4) +
-    caixa('dx-fraq', 856, 318, 408, 222, 4) + caixa('dx-formas', 856, 552, 408, 152, 4) + '</div>';
+    caixa('dx-fraq', 856, 318, 408, 222, 4) + caixa('dx-formas', 856, 552, 408, 152, 4) + '</div>' +
+    "<div id='dx-zoom' hidden><div class='dx-zoom-c'><img id='dx-zoom-img' alt=''/><span id='dx-zoom-txt'></span></div></div>";
+
+  var html = document.documentElement;
+  function movel() { return html.classList.contains('movel'); }
+  function abrirLista(abrir) {
+    html.classList.toggle('dx-aberta', abrir);
+    html.classList.toggle('travado', abrir && movel());
+    if (abrir) { var it = $('dx-grade').querySelector('.dx-it.on'); if (it) { it.scrollIntoView({ block: 'center' }); } }
+  }
+  function passo(d) {
+    var f = filtrados(); if (!f.length) { return; }
+    var i = f.findIndex(function (p) { return p.id === idLista(); });
+    var novo = f[(i + d + f.length) % f.length].id;
+    mudar(function () { S.lista = novo; S.evo = S.forma = null; });
+    var it = $('dx-grade').querySelector('.dx-it.on'); if (it && !movel()) { it.scrollIntoView({ block: 'nearest' }); }
+  }
+  // carta grande: pokemontcg.io tem versão _hires; scrydex (coleções novas) tem /large
+  function abrirCarta(src, txt) {
+    var img = $('dx-zoom-img');
+    img.onerror = function () { img.onerror = null; img.src = src; };
+    img.src = /images\.pokemontcg\.io\/.+\.png$/.test(src) ? src.replace(/\.png$/, '_hires.png') : src.replace(/\/small$/, '/large');
+    $('dx-zoom-txt').textContent = txt;
+    $('dx-zoom').hidden = false;
+  }
 
   function $(id) { return document.getElementById(id); }
   function renderLista() {
     $('dx-grade').innerHTML = listaHtml();
     $('dx-marca').innerHTML = marcaHtml();
+    $('dx-abrir-n').textContent = filtrados().length.toLocaleString('pt-BR');
   }
   function renderSel() {
     var p = P[idSel()];
@@ -258,10 +288,19 @@
   }
 
   raiz.addEventListener('click', function (ev) {
+    if (ev.target.closest('#dx-zoom')) { $('dx-zoom').hidden = true; return; }
     var el = ev.target.closest('[data-acao]'); if (!el) { return; }
     var id = +el.getAttribute('data-id');
     switch (el.getAttribute('data-acao')) {
-      case 'lista': mudar(function () { S.lista = id; S.evo = null; S.forma = null; }); break;
+      case 'lista':
+        mudar(function () { S.lista = id; S.evo = null; S.forma = null; });
+        if (movel()) { abrirLista(false); window.scrollTo(0, 0); }
+        break;
+      case 'abrir': abrirLista(true); break;
+      case 'fechar': abrirLista(false); break;
+      case 'ant': passo(-1); break;
+      case 'prox': passo(1); break;
+      case 'carta': abrirCarta(el.getAttribute('data-img'), el.getAttribute('data-txt')); break;
       case 'evo': mudar(function () {
         S.forma = null;
         S.evo = (S.evo === id || (!S.evo && id === idLista())) ? null : id;
@@ -274,6 +313,9 @@
   $('dx-gen').addEventListener('change', function () { S.gen = this.value; S.evo = S.forma = null; renderLista(); renderSel(); });
   $('dx-tipo').addEventListener('change', function () { S.tipo = this.value; S.evo = S.forma = null; renderLista(); renderSel(); });
   $('dx-busca').addEventListener('input', function () { S.busca = this.value; renderLista(); });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape') { $('dx-zoom').hidden = true; abrirLista(false); }
+  });
 
   // link direto: index.html#25 abre o Pikachu
   var h = +(location.hash || '').slice(1);

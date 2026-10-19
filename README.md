@@ -18,6 +18,7 @@ Pokédex interativa e animada que roda direto no navegador, sem instalar nada. C
 - **Safari**: minijogo estilo GBA em canvas: ande pelo mato, encontre Pokémon selvagens e capture com Pokébolas (fórmula de captura da 3ª geração).
 - **Quiz "Quem é esse Pokémon?"**: silhueta, 4 opções ou digitar o nome, cronômetro, dicas, sequência e recorde.
 - Link direto para um Pokémon: `index.html#25` abre o Pikachu.
+- **Funciona no celular**: a Pokédex vira uma página vertical (lista em tela cheia, setas ‹ › para passear, toque na carta para ampliar); Arena, Tipos, Quiz e Safari giram para a horizontal sozinhas, com direcional de toque no Safari.
 
 ## Estrutura
 

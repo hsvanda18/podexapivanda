@@ -1,15 +1,28 @@
-/* Versão web: página inteira, navegação entre páginas e aviso de tela vertical. */
-html, body { margin: 0; height: 100%; background: #0B0E14; overflow: hidden; }
+/* Moldura das páginas: palco 1280x720 escalado, navegação e telas de celular.
+   body.paisagem  páginas de jogo (Arena, Tipos, Quiz, Safari): no celular em pé, a tela gira 90° sozinha
+   body.dex       Pokédex: no celular (html.movel) vira uma página vertical com rolagem (ver dex.css) */
+html, body { margin: 0; height: 100%; background: #0B0E14; overflow: hidden; -webkit-text-size-adjust: 100%; }
 body, #htmlContent { font-family: 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif; }
+#pk-tela { position: fixed; left: 0; top: 0; width: 100%; height: 100%; transform-origin: 0 0; overflow: hidden; }
 #htmlContent, .htmlViewerEntry { height: 100%; }
 #app-raiz { width: 100%; height: 100%; }
+button, [data-acao], [data-tecla], a { -webkit-tap-highlight-color: transparent; }
+[data-tecla] { touch-action: none; user-select: none; -webkit-user-select: none; }
 
-#pk-nav { position: fixed; left: 0; top: 0; z-index: 50; display: flex; gap: 4px; transform-origin: 0 0; height: 30px; }
+#pk-nav { position: absolute; left: 0; top: 0; z-index: 50; display: flex; gap: 4px; transform-origin: 0 0; height: 30px; }
 #pk-nav a { flex: 1; display: flex; align-items: center; justify-content: center; padding: 0 2px; border-radius: 999px; border: 1px solid #283041; background: #1A2030; color: #C9CFDA; font: 700 9pt 'Segoe UI', system-ui, sans-serif; text-decoration: none; white-space: nowrap; transition: background .12s, color .12s; }
 #pk-nav a:hover { background: #252D40; color: #fff; border-color: #fff; }
 #pk-nav a.on { background: #FFCB05; border-color: #FFCB05; color: #11151D; }
 #pk-nav a:focus-visible { outline: 2px solid #FFCB05; outline-offset: 2px; }
 
-#pk-girar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: none; padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); background: rgba(20,25,34,.95); border-top: 1px solid #283041; color: #C9CFDA; font: 600 12px 'Segoe UI', system-ui, sans-serif; text-align: center; }
-@media (orientation: portrait) and (max-width: 820px) { #pk-girar { display: block; } }
+/* ---------- Pokédex no celular: página vertical ---------- */
+html.movel, html.movel body { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto; }
+html.movel #pk-tela { position: relative; width: auto; height: auto; overflow: visible; display: flex; flex-direction: column; }
+html.movel #htmlContent, html.movel .htmlViewerEntry, html.movel #app-raiz { height: auto; overflow: visible; width: auto; }
+html.movel #pk-nav { order: -1; position: sticky; top: 0; z-index: 30; height: auto; width: auto !important; transform: none !important; gap: 6px;
+  padding: calc(8px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  background: rgba(11,14,20,.88); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255,255,255,.06); }
+html.movel #pk-nav a { height: 34px; font-size: 12px; }
+html.travado, html.travado body { overflow: hidden; }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition: none !important; } }
