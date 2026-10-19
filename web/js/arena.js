@@ -282,7 +282,8 @@
         <p class='sala-tx'>${NET.papel === 'host' ? 'Tu escolhes o formato (1 x 1 ou Time de 3) lá em cima.' : 'O formato é escolhido por quem criou a sala.'} O time dele só aparece quando a batalha começar.</p>
         <div class='bt bt-sec sala-sair' data-acao='sairSala'>Sair da sala</div>`;
     }
-    return `<div class='sel-col sel-col-o sala'><div class='sel-col-tit'><span>${tit}</span><em>${tag}</em></div>${aviso}<div class='sala-corpo'>${corpo}</div></div>`;
+    var turn = NET && (e === 'sala' || e === 'ligado') ? `<div class='sala-turn${NET.turn ? ' on' : ''}'>${NET.turn ? '🛰 Retransmissão ativa (funciona em 4G/5G)' : 'Só ligação direta (sem retransmissão)'}</div>` : '';
+    return `<div class='sel-col sel-col-o sala'><div class='sel-col-tit'><span>${tit}</span><em>${tag}</em></div>${aviso}<div class='sala-corpo'>${corpo}${turn}</div></div>`;
   }
   function rodapeOnline() {
     var ligado = NET && NET.estado === 'ligado', cheio = S.time.j.length === tamanhoTime();

@@ -7,6 +7,11 @@
   var URL_PEERJS = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
   var PREFIXO = 'pkdx-', LETRAS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   var ESPERA_LIGAR = 15000, SILENCIO_MAX = 30000, TOLERANCIA_ICE = 8000;
+  /* TURN (Metered, plano gratuito): retransmite quando a ligação direta não abre (algumas redes 4G/5G).
+     Sem resposta da Metered em 4 s, segue só com a ligação direta, como antes. */
+  var TURN_APP = 'pokedex', TURN_CHAVE = '533fda93247b4db8870af29d8f4bed9a8245';
+  var STUN_PUBLICO = [{ urls: 'stun:stun.l.google.com:19302' }];
+  var iceGuardado = null;
   var peer = null, conn = null, ouvintes = [], estadoFns = [], timerPing = null, timerLigar = null, ultimo = 0;
   var O = window.PKOnline = { estado: 'off', papel: null, codigo: null, erro: '' };
 
@@ -24,6 +29,21 @@
       document.head.appendChild(s);
     });
   }
+  function obterIce() {
+    if (!TURN_APP || !TURN_CHAVE || !window.fetch) { return Promise.resolve(null); }
+    if (iceGuardado && Date.now() - iceGuardado.em < 3600000) { return Promise.resolve(iceGuardado.lista); }
+    var ctrl = window.AbortController ? new AbortController() : null;
+    if (ctrl) { setTimeout(function () { ctrl.abort(); }, 4000); }
+    return fetch('https://' + TURN_APP + '.metered.live/api/v1/turn/credentials?apiKey=' + TURN_CHAVE, ctrl ? { signal: ctrl.signal } : {})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (lista) {
+        if (!Array.isArray(lista) || !lista.length) { return null; }
+        iceGuardado = { em: Date.now(), lista: lista };
+        return lista;
+      })
+      .catch(function () { return null; });
+  }
+  function opcoesPeer(ice) { return { debug: 0, config: { iceServers: STUN_PUBLICO.concat(ice || []) } }; }
   function gerarCodigo() {
     var c = '';
     for (var i = 0; i < 6; i++) { c += LETRAS[Math.floor(Math.random() * LETRAS.length)]; }
@@ -85,9 +105,10 @@
 
   O.criarSala = function (tentativa) {
     limpar(); O.papel = 'host'; O.codigo = null; avisar('a-ligar');
-    carregar().then(function () {
+    carregar().then(obterIce).then(function (ice) {
       var codigo = gerarCodigo();
-      peer = new window.Peer(PREFIXO + codigo, { debug: 0 });
+      O.turn = !!ice;
+      peer = new window.Peer(PREFIXO + codigo, opcoesPeer(ice));
       peer.on('open', function () { O.codigo = codigo; avisar('sala'); });
       peer.on('connection', function (c) {
         if (conn && conn.open) { c.on('open', function () { c.send({ t: 'cheia' }); setTimeout(function () { c.close(); }, 500); }); return; }
@@ -106,8 +127,9 @@
     codigo = String(codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     limpar(); O.papel = 'conv'; O.codigo = codigo; avisar('a-ligar');
     if (codigo.length !== 6) { avisar('erro', 'O código da sala tem 6 letras ou números.'); return; }
-    carregar().then(function () {
-      peer = new window.Peer({ debug: 0 });
+    carregar().then(obterIce).then(function (ice) {
+      O.turn = !!ice;
+      peer = new window.Peer(opcoesPeer(ice));
       peer.on('open', function () {
         usarConexao(peer.connect(PREFIXO + codigo, { reliable: true }));
         timerLigar = setTimeout(function () {

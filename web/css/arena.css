@@ -289,3 +289,5 @@
 .bt-go.pronto { background: linear-gradient(90deg, #1FA971, #3DDC97); animation: none; }
 .bt-mega.marcada { box-shadow: 0 0 0 2px #fff, 0 0 20px rgba(255,255,255,.5); animation: none; }
 .on-tag { font-size: 11px; font-weight: 800; color: #3DDC97; text-align: center; padding: 6px 4px; }
+.sala-turn { font-size: 10px; font-weight: 700; color: #737C8C; text-align: center; }
+.sala-turn.on { color: #3DDC97; }
