@@ -44,7 +44,7 @@
   if (!S || !S.v2) {
     S = window.__safari = { v2: true, x: 14, y: 10, dir: 'baixo', passo: 0, anda: null, gen: 0, folhas: null,
       msg: 'Clique no mapa e use as setas (ou WASD) para andar. O mato alto esconde Pokémon!',
-      bolsa: { poke: 10, grande: 5, ultra: 3, fruta: 3 }, caixa: [], vistos: {}, enc: 0, fugas: 0, shinies: 0, lendarios: 0, luta: null, tecla: null };
+      bolsa: { poke: 10, grande: 5, ultra: 3 }, caixa: [], vistos: {}, enc: 0, fugas: 0, shinies: 0, lendarios: 0, luta: null, tecla: null };
   }
   function $(id) { return document.getElementById(id); }
   var BOLAS = { poke: { nome: 'Pokébola', mult: 1, cor: '#E3350D' }, grande: { nome: 'Grande Bola', mult: 1.5, cor: '#2E6FE8' }, ultra: { nome: 'Ultra Bola', mult: 2, cor: '#F2C21B' } };
@@ -210,7 +210,7 @@
   function chegou(t) {
     var ch = tile(S.x, S.y);
     if (ch === 'D') {
-      S.bolsa = { poke: 10, grande: 5, ultra: 3, fruta: 3 };
+      S.bolsa = { poke: 10, grande: 5, ultra: 3 };
       mensagem('🏥 Bem-vindo ao <b>Centro Pokémon</b>! Sua mochila foi reabastecida.');
       S.x = 8; S.y = 9; S.dir = 'baixo'; atualizarLado();
       return;
@@ -230,7 +230,14 @@
     return comuns[comuns.length - 1];
   }
   function taxaCaptura(p) { return p.lend ? 45 : Math.max(10, Math.min(255, Math.round(255 - (p.total - 200) * 0.62))); }
-  function valorA(L, bola) { return taxaCaptura(K.P[L.id]) * BOLAS[bola].mult * (L.fruta ? 1.5 : 1) * 2 / 3; /* bônus do Safari: como se estivesse com ~1/3 do HP */ }
+  /* L.mod: pedras dobram e iscas cortam a taxa de captura (de ¼ a 4×), como na Zona Safari dos jogos */
+  function valorA(L, bola) { return taxaCaptura(K.P[L.id]) * BOLAS[bola].mult * (L.mod || 1) * 2 / 3; /* bônus do Safari: como se estivesse com ~1/3 do HP */ }
+  /* irritado (pedra): foge 2× mais · comendo (isca): foge 4× menos */
+  function chanceFuga(L) {
+    var p = K.P[L.id], base = p.lend ? 0.04 + L.tentativas * 0.02 : 0.05 + p.b.spe / 600 + L.tentativas * 0.03;
+    return Math.min(0.95, base * (L.raiva > 0 ? 2 : L.come > 0 ? 0.25 : 1));
+  }
+  function humor(L) { return L.raiva > 0 ? '😠 irritado' : L.come > 0 ? '😋 a comer' : '👀 atento'; }
   function chanceCaptura(L, bola) {
     var a = valorA(L, bola); if (a >= 255) { return 1; }
     return Math.pow(1048560 / Math.sqrt(Math.sqrt(16711680 / a)) / 65536, 4);
@@ -247,7 +254,7 @@
     S.enc++; S.tecla = null; S.vistos[p.id] = 1;
     if (shiny) { S.shinies++; }
     if (p.lend) { S.lendarios++; }
-    S.luta = { id: p.id, shiny: shiny, nivel: p.lend ? 50 : 3 + Math.floor(Math.random() * 45), sexo: Math.random() < 0.5 ? '♂' : '♀', fruta: false, fase: 'transicao', tentativas: 0 };
+    S.luta = { id: p.id, shiny: shiny, nivel: p.lend ? 50 : 3 + Math.floor(Math.random() * 45), sexo: Math.random() < 0.5 ? '♂' : '♀', mod: 1, raiva: 0, come: 0, fase: 'transicao', tentativas: 0 };
     render();
     setTimeout(function () {
       if (!S.luta) { return; }
@@ -288,21 +295,42 @@
     if (bolaEl) { bolaEl.classList.add('abre'); }
     if (mon) { mon.classList.remove('suga'); mon.classList.add('escapa'); }
     L.texto = ['Ah não! O Pokémon escapou!', 'Argh! Quase!', 'Puxa! Parecia que tinha pegado!', 'Droga! Foi por pouco!'][Math.min(n, 3)];
-    L.fruta = false; atualizarTexto();
+    atualizarTexto();
     await esperar(1000);
     if (bolaEl) { bolaEl.remove(); }
-    var foge = p.lend ? 0.04 + L.tentativas * 0.02 : 0.05 + p.b.spe / 600 + L.tentativas * 0.03;
-    if (Math.random() < foge) {
+    await fimDeTurno(L);
+  }
+  /* depois de cada ação o Pokémon pode fugir; irritação e fome duram alguns turnos */
+  async function fimDeTurno(L) {
+    var p = K.P[L.id], mon = $('sf-mon');
+    if (Math.random() < chanceFuga(L)) {
       S.fugas++; L.fase = 'fim'; L.texto = `O <b>${esc(p.nome)}</b> selvagem fugiu!`; atualizarTexto();
       if (mon) { mon.classList.add('foge'); }
       await esperar(1300); S.luta = null; mensagem(`O ${esc(p.nome)} fugiu... continue procurando no mato!`); render();
       return;
     }
-    L.fase = 'menu'; L.texto = `O que você vai fazer?`; render();
+    if (L.raiva > 0) { L.raiva--; } else if (L.come > 0) { L.come--; }
+    L.fase = 'menu';
+    L.texto = L.raiva > 0 ? `O <b>${esc(p.nome)}</b> está irritado!` : L.come > 0 ? `O <b>${esc(p.nome)}</b> está a comer.` : `O <b>${esc(p.nome)}</b> está a observar...`;
+    render();
   }
-  function usarFruta() {
-    var L = S.luta; if (!L || L.fase !== 'menu' || S.bolsa.fruta <= 0 || L.fruta) { return; }
-    S.bolsa.fruta--; L.fruta = true; L.texto = `Você jogou uma <b>Fruta Frambo</b>! O ${esc(K.P[L.id].nome)} parece mais calmo.`; render();
+  /* 'pedra': captura 2× mais fácil, mas irrita (foge mais) · 'isca': 2× mais difícil, mas acalma (foge menos) */
+  async function atirar(oque) {
+    var L = S.luta; if (!L || L.fase !== 'menu') { return; }
+    var p = K.P[L.id], pedra = oque === 'pedra', turnos = 1 + Math.floor(Math.random() * 5);
+    L.fase = 'animando'; L.tentativas++;
+    L.texto = pedra ? `Você atirou uma <b>Pedra</b>!` : `Você atirou uma <b>Isca</b>!`; render();
+    var cena = $('sf-cena'), tr = $('sf-tr'), mon = $('sf-mon');
+    if (tr) { tr.classList.add('joga'); }
+    if (cena) { var o = document.createElement('div'); o.className = 'sf-obj voa'; o.textContent = pedra ? '🪨' : '🍓'; cena.appendChild(o); setTimeout(function () { o.remove(); }, 900); }
+    await esperar(700);
+    if (mon) { mon.classList.remove('bravo', 'feliz'); void mon.offsetWidth; mon.classList.add(pedra ? 'bravo' : 'feliz'); }
+    if (pedra) { L.mod = Math.min(4, (L.mod || 1) * 2); L.raiva = Math.min(5, L.raiva + turnos); L.come = 0; }
+    else { L.mod = Math.max(0.25, (L.mod || 1) / 2); L.come = Math.min(5, L.come + turnos); L.raiva = 0; }
+    L.texto = pedra ? `O <b>${esc(p.nome)}</b> ficou irritado! 😠` : `O <b>${esc(p.nome)}</b> está a comer! 😋`;
+    atualizarTexto();
+    await esperar(1000);
+    await fimDeTurno(L);
   }
   function fugir() { if (!S.luta || S.luta.fase !== 'menu') { return; } S.luta = null; mensagem('Você fugiu em segurança.'); render(); }
 
@@ -317,13 +345,14 @@
     if (L.shiny) { urls = urls.map(urlShiny).concat(urls); }
     var menu = L.fase === 'menu' ? `<div class='sf-menu'>
         ${['poke', 'grande', 'ultra'].map(function (b) { return `<div class='sf-op${S.bolsa[b] ? '' : ' off'}' data-acao='bola' data-b='${b}'><i class='sf-mini' style='--c:${BOLAS[b].cor}'></i><span>${BOLAS[b].nome}<em>×${S.bolsa[b]}</em></span><small>${Math.round(100 * chanceCaptura(L, b))}%</small></div>`; }).join('')}
-        <div class='sf-op${S.bolsa.fruta && !L.fruta ? '' : ' off'}' data-acao='fruta'><i class='sf-fruta'>🍓</i><span>Fruta Frambo<em>×${S.bolsa.fruta}</em></span><small>+50%</small></div>
+        <div class='sf-op' data-acao='atirar' data-o='pedra' title='Captura 2× mais fácil, mas ele fica irritado e foge mais'><i class='sf-fruta'>🪨</i><span>Pedra / Lama<em>captura ↑ fuga ↑</em></span></div>
+        <div class='sf-op' data-acao='atirar' data-o='isca' title='Ele fica a comer e foge menos, mas a captura fica 2× mais difícil'><i class='sf-fruta'>🍓</i><span>Isca<em>fuga ↓ captura ↓</em></span></div>
         <div class='sf-op fugir' data-acao='fugir'><i class='sf-fruta'>🏃</i><span>Fugir<em>voltar ao mato</em></span></div></div>` : '';
     var fixo = L.entrou ? ' fixo' : ''; L.entrou = true;
     return `<div class='sf-luta${p.lend ? ' lend' : ''}${L.shiny ? ' shy' : ''}${fixo}' id='sf-cena' style='--c:${K.corTipo(p.t[0])}'>
       <div class='sf-ceu'><i class='nv n1'></i><i class='nv n2'></i><i class='nv n3'></i></div><div class='sf-arvores'></div><div class='sf-campo'></div>
       <div class='sf-hud'><div class='sf-hud-l'><b>${esc(p.nome)}</b><span class='sx ${L.sexo === '♂' ? 'm' : 'f'}'>${L.sexo}</span>${L.shiny ? `<span class='sf-sh'>✨</span>` : ''}${p.lend ? `<span class='sf-lend'>LENDÁRIO</span>` : ''}<span class='nv-l'>Nv${L.nivel}</span></div>
-        <div class='sf-hp'><em>HP</em><div><i></i></div></div><div class='sf-tipos'>${p.t.map(K.chip).join('')}<span class='sf-chance'>${L.fruta ? '🍓 calmo · ' : ''}captura com Pokébola <b>${Math.round(100 * chanceCaptura(L, 'poke'))}%</b></span></div></div>
+        <div class='sf-hp'><em>HP</em><div><i></i></div></div><div class='sf-tipos'>${p.t.map(K.chip).join('')}<span class='sf-chance'>${humor(L)} · fuga <b class='fg'>${Math.round(100 * chanceFuga(L))}%</b> · captura <b>${Math.round(100 * chanceCaptura(L, 'poke'))}%</b></span></div></div>
       <div class='sf-plat-o'></div><div class='sf-plat-j'></div>
       <div class='sf-mon${L.shiny ? ' shiny' : ''}' id='sf-mon'>${K.img(urls)}${L.shiny ? `<div class='sf-brilho'><i></i><i></i><i></i><i></i><i></i></div>` : ''}</div>
       <canvas class='sf-tr' id='sf-tr' width='128' height='128'></canvas>
@@ -332,7 +361,7 @@
   function ladoHtml() {
     var bolsa = ['poke', 'grande', 'ultra'].map(function (b) {
       return `<div class='sf-item'><i class='sf-mini' style='--c:${BOLAS[b].cor}'></i><span>${BOLAS[b].nome}</span><b>×${S.bolsa[b]}</b></div>`;
-    }).join('') + `<div class='sf-item'><i>🍓</i><span>Fruta Frambo</span><b>×${S.bolsa.fruta}</b></div>`;
+    }).join('') + `<div class='sf-item'><i>🪨🍓</i><span>Pedras e iscas</span><b>∞</b></div>`;
     var caixa = S.caixa.map(function (c, i) {
       var p = K.P[c.id], src = c.shiny ? K.URL.sprite(c.id).replace('/pokemon/', '/pokemon/shiny/') : K.URL.sprite(c.id);
       return `<div class='sf-cx${c.shiny ? ' sh' : ''}${p.lend ? ' ld' : ''}' data-acao='ver' data-i='${i}' title='Ver ${esc(p.nome)} na Pokédex'><img src='${src}'/><i class='sf-mini' style='--c:${BOLAS[c.bola].cor}'></i>${c.shiny ? '<em>✨</em>' : ''}<span>${esc(p.nome)}</span></div>`;
@@ -447,7 +476,7 @@
     var el = ev.target.closest('[data-acao]'); if (!el || el.classList.contains('off')) { return; }
     switch (el.getAttribute('data-acao')) {
       case 'bola': arremessar(el.getAttribute('data-b')); break;
-      case 'fruta': usarFruta(); break;
+      case 'atirar': atirar(el.getAttribute('data-o')); break;
       case 'fugir': fugir(); break;
       case 'gen': S.gen = +el.getAttribute('data-g'); atualizarLado(); break;
       case 'ver':
@@ -459,7 +488,7 @@
     }
   };
 
-  window.__safariApi = { chanceCaptura: chanceCaptura, taxaCaptura: taxaCaptura, sortearPokemon: sortearPokemon, mover: mover, tile: tile, encontro: encontro, dexHtml: dexHtml, acaoDex: acaoDex };
+  window.__safariApi = { chanceFuga: chanceFuga, atirar: atirar, chanceCaptura: chanceCaptura, taxaCaptura: taxaCaptura, sortearPokemon: sortearPokemon, mover: mover, tile: tile, encontro: encontro, dexHtml: dexHtml, acaoDex: acaoDex };
   if (window.__safariLaco && window.cancelAnimationFrame) { window.cancelAnimationFrame(window.__safariLaco); }
   if (S.luta && S.luta.fase !== 'menu') { S.luta.fase = 'menu'; S.luta.texto = 'O que você vai fazer?'; }
   render();

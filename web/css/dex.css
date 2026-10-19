@@ -279,3 +279,28 @@ html.movel .ev-img img { max-width: 58px; max-height: 58px; }
 html.movel .ev-nome { font-size: 11px; }
 html.movel .ev-evoluir { font-size: 7px; padding: 1px 5px; right: -6px; }
 html.movel .fms { padding-bottom: 6px; }
+
+/* ---------- modo Golpes ---------- */
+.gd-filtros { width: 100%; display: flex; gap: 6px; margin: -2px 0 8px; }
+.gd-f { flex: 1; height: 26px; border-radius: 999px; border: 1px solid #283041; background: #1A2030; color: #C9CFDA; font: 700 10.5px 'Segoe UI', system-ui, sans-serif; cursor: pointer; }
+.gd-f:hover { background: #252D40; color: #fff; }
+.gd-f.on { background: #FFCB05; border-color: #FFCB05; color: #11151D; }
+.gd-cab, .gd { width: 100%; box-sizing: border-box; display: grid; grid-template-columns: 20px minmax(0, 1fr) 58px 38px 52px 112px; gap: 8px; align-items: center; }
+.gd-cab { padding: 0 10px 4px; font-size: 8.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #5C6575; }
+.gd-lista { width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; padding-right: 4px; box-sizing: border-box; }
+.gd { padding: 5px 10px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-left: 3px solid var(--c); }
+.gd b { font-size: 12px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gd-cat { font-size: 10.5px; color: #A9B1BF; font-weight: 700; }
+.gd-n { font-size: 12px; font-weight: 800; color: #E9ECF2; text-align: right; font-variant-numeric: tabular-nums; }
+.gd-cab .gd-n { font-size: 8.5px; color: #5C6575; }
+.gd em { display: flex; flex-wrap: wrap; gap: 3px; font-style: normal; }
+.gd em i { font-style: normal; font-size: 8.5px; font-weight: 800; color: #C9CFDA; background: rgba(255,255,255,.08); padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+.gd em i.gd-stab { color: #11151D; background: #FFCB05; }
+html.movel .gd-lista { max-height: 62vh; }
+html.movel .gd-cab, html.movel .gd { grid-template-columns: 18px minmax(0, 1fr) 34px 40px; }
+html.movel .gd-cat, html.movel .gd em, html.movel .gd-cab span:nth-child(3), html.movel .gd-cab span:nth-child(6) { display: none; }
+html.movel .gd-f { height: 34px; font-size: 12px; }
+
+/* ---------- vantagens ---------- */
+.fq-dica { margin-left: 8px; font-size: 9px; font-weight: 600; letter-spacing: 0; color: #5C6575; }
+.ch-van { box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }

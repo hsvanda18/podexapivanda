@@ -209,3 +209,12 @@
 .dx-info { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 800; color: #FFF; text-shadow: 0 1px 1px rgba(0,0,0,.4); }
 .dx-info .sf-mini { width: 18px; height: 18px; } .dx-info .sf-mini::after { width: 4px; height: 4px; margin: -4px 0 0 -4px; }
 .dx-info em { margin-left: auto; font-style: normal; font-family: Consolas, monospace; background: rgba(0,0,0,.25); padding: 2px 8px; border-radius: 6px; }
+
+/* pedra / isca */
+.sf-obj { position: absolute; z-index: 5; font-size: 30px; line-height: 1; margin: -15px 0 0 -15px; pointer-events: none; }
+.sf-obj.voa { left: 230px; top: 400px; animation: sf-voa .7s cubic-bezier(.3,.1,.5,1) forwards; }
+.sf-mon.bravo { animation: sf-bravo .5s ease-in-out 2; }
+.sf-mon.feliz { animation: sf-feliz .45s ease-in-out 3; }
+@keyframes sf-bravo { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px) rotate(-4deg); } 75% { transform: translateX(10px) rotate(4deg); } }
+@keyframes sf-feliz { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+.sf-chance b.fg { color: #C83020; }

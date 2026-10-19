@@ -101,6 +101,7 @@
       `<div class='hero-nome${classeNome}'>${esc(nome)}</div>` + (p.cat ? `<div class='hero-cat'>${esc(p.cat)}</div>` : '') +
       `<div class='hero-pills'><span class='pill'>${esc(p.genLabel)}</span><span class='pill'>Estágio ${p.est}/${p.ests}</span>` +
       `<span class='pill${rarCls}'>${p.rar}</span>${shiny ? "<span class='pill pill-shiny'>✨ SHINY</span>" : ''}</div>`;
+    if (S.modo === 4) { return `<div class='hero${cls}'>${topo}${golpesHtml(p)}</div>`; }
     if (S.modo === 3) {
       var cartas = cartasDe(p);
       var gal = `<div class='cg-head'>CARTAS DE ${esc(p.nomeEsp.toUpperCase())}<b>${cartas.length}</b></div>`;
@@ -129,6 +130,40 @@
       `<div class='fato'><span>PESO</span><b>${fmt(p.peso, 1)} kg</b></div>` +
       `<div class='fato'><span>TOTAL BASE</span><b>${p.total}</b></div></div>` +
       (p.desc ? `<p class='hero-desc-m'>${esc(p.desc)}</p>` : '') + '</div>';
+  }
+
+  /* ---------- golpes de ataque que esta forma aprende (dados/golpes.js) ---------- */
+  var GD = window.GOLPES_DADOS;
+  function acertos(g) { return g[7] <= 1 ? 1 : g[6] === 2 && g[7] === 5 ? 3.1 : (g[6] + g[7]) / 2; }
+  function golpesDex(p) {
+    if (!GD) { return []; }
+    var ids = GD.a[p.id];
+    if (!ids) { var base = PADRAO.find(function (x) { return x.esp === p.esp; }); ids = base && GD.a[base.id]; }
+    return (ids || []).map(function (i) { return GD.g[i]; });
+  }
+  function golpesHtml(p) {
+    var todos = golpesDex(p), f = S.gfil || '';
+    var lista = todos.filter(function (g) { return !f || (f === 'stab' ? p.t.indexOf(g[1]) >= 0 : g[2] === f); })
+      .sort(function (a, b) { return b[3] * acertos(b) - a[3] * acertos(a) || a[0].localeCompare(b[0]); });
+    var filtros = [['', 'Todos'], ['stab', 'Do tipo dele'], ['F', 'Físicos'], ['E', 'Especiais']].map(function (x) {
+      return `<button class='gd-f${f === x[0] ? ' on' : ''}' data-acao='gfil' data-f='${x[0]}'>${x[1]}</button>`;
+    }).join('');
+    var linhas = lista.map(function (g) {
+      var tags = [];
+      if (p.t.indexOf(g[1]) >= 0) { tags.push("<i class='gd-stab'>STAB</i>"); }
+      if (g[5] > 0) { tags.push('<i>⚡ +' + g[5] + '</i>'); }
+      if (g[7] > 1) { tags.push('<i>' + (g[6] === g[7] ? g[6] : g[6] + '–' + g[7]) + ' acertos</i>'); }
+      if (g[8] > 0) { tags.push('<i>drena ' + g[8] + '%</i>'); }
+      if (g[8] < 0) { tags.push('<i>recuo ' + (-g[8]) + '%</i>'); }
+      if (g[9] === 1) { tags.push('<i>crítico alto</i>'); }
+      if (g[9] === 2) { tags.push('<i>sempre crítico</i>'); }
+      return `<div class='gd' style='--c:${K.corTipo(g[1])}'>${K.icone(g[1], 18)}<b>${esc(g[0])}</b><span class='gd-cat'>${g[2] === 'F' ? 'Físico' : 'Especial'}</span>` +
+        `<span class='gd-n'>${g[3]}</span><span class='gd-n'>${g[4] ? g[4] + '%' : '—'}</span><em>${tags.join('')}</em></div>`;
+    }).join('');
+    return `<div class='cg-head'>GOLPES DE ATAQUE QUE ${esc(p.nome.toUpperCase())} APRENDE<b>${todos.length}</b></div>` +
+      `<div class='gd-filtros'>${filtros}</div>` +
+      (lista.length ? `<div class='gd-cab'><span></span><span>Golpe</span><span>Categoria</span><span class='gd-n'>Poder</span><span class='gd-n'>Precisão</span><span></span></div><div class='gd-lista'>${linhas}</div>`
+        : "<div class='cg-vazio'>Nenhum golpe de ataque nesta lista.</div>");
   }
 
   function cabeca(p, titulo, extra) {
@@ -167,8 +202,15 @@
     var chipR = resiste.map(function (x) {
       return `<span class='ch ch-res bg-${x.t}${x.m === 0 ? ' ch-imune' : ''}'>${esc(K.nomeTipo(x.t))}<b>${x.m === 0 ? '0×' : x.m === .25 ? '¼×' : '½×'}</b></span>`;
     }).join('');
-    return "<div class='pn'>" + cabeca(p, 'FRAQUEZAS E RESISTÊNCIAS', "<span class='pn-sub'>dano recebido</span>") + "<div class='fq'>" +
-      `<div class='fq-sec'>FRACO CONTRA <i>${fracos.length}</i></div>` + (chipF ? `<div class='fq-chips'>${chipF}</div>` : "<div class='fq-vazio'>Nenhuma fraqueza</div>") +
+    // vantagem: tipos que os golpes do próprio tipo dele acertam com dano dobrado
+    var forte = K.TIPOS.map(function (t, i) { return { t: t, i: i, m: Math.max.apply(null, p.t.map(function (a) { return K.ef(a, t); })) }; })
+      .filter(function (x) { return x.m > 1; });
+    var chipV = forte.map(function (x) { return `<span class='ch ch-van bg-${x.t}'>${esc(K.nomeTipo(x.t))}<b>${x.m}×</b></span>`; }).join('');
+    var golpesDoTipo = p.t.map(function (t) { return esc(K.nomeTipo(t)); }).join(' e ');
+    return "<div class='pn'>" + cabeca(p, 'FRAQUEZAS E VANTAGENS', '') + "<div class='fq'>" +
+      `<div class='fq-sec'>VANTAGEM <i>${forte.length}</i><span class='fq-dica'>golpes de ${golpesDoTipo} causam dano dobrado em</span></div>` +
+      (chipV ? `<div class='fq-chips'>${chipV}</div>` : "<div class='fq-vazio'>Nenhuma vantagem de tipo</div>") +
+      `<div class='fq-sec'>FRACO CONTRA <i>${fracos.length}</i><span class='fq-dica'>dano recebido</span></div>` + (chipF ? `<div class='fq-chips'>${chipF}</div>` : "<div class='fq-vazio'>Nenhuma fraqueza</div>") +
       `<div class='fq-sec'>RESISTE OU É IMUNE <i>${resiste.length}</i></div>` + (chipR ? `<div class='fq-chips'>${chipR}</div>` : "<div class='fq-vazio'>Nenhuma resistência</div>") +
       '</div></div>';
   }
@@ -229,9 +271,9 @@
     `<div class='dx-cx dx-lista' style='left:16px;top:134px;width:332px;height:570px;z-index:3'><input id='dx-busca' class='dx-busca' type='search' placeholder='Pesquisar' autocomplete='off' aria-label='Pesquisar Pokémon'/><div id='dx-grade' class='dx-grade'></div></div></div>` +
     caixa('dx-hero', 364, 14, 472, 462, 4) +
     `<div class='dx-cx' style='left:520px;top:18px;width:316px;height:30px;z-index:5'><div class='dx-modos' id='dx-modos'>` +
-    ['Normal', '✨ Shiny', '🃏 Cartas'].map(function (m, i) { return `<button class='dx-bt' data-acao='modo' data-m='${i + 1}'>${m}</button>`; }).join('') + '</div></div>' +
-    caixa('dx-evo', 360, 486, 480, 218, 4) + caixa('dx-atr', 856, 16, 408, 290, 4) +
-    caixa('dx-fraq', 856, 318, 408, 222, 4) + caixa('dx-formas', 856, 552, 408, 152, 4) + '</div>' +
+    ['Normal', '✨ Shiny', '🃏 Cartas', '⚔ Golpes'].map(function (m, i) { return `<button class='dx-bt' data-acao='modo' data-m='${i + 1}'>${m}</button>`; }).join('') + '</div></div>' +
+    caixa('dx-evo', 360, 486, 480, 218, 4) + caixa('dx-atr', 856, 16, 408, 276, 4) +
+    caixa('dx-fraq', 856, 304, 408, 248, 4) + caixa('dx-formas', 856, 564, 408, 140, 4) + '</div>' +
     "<div id='dx-zoom' hidden><div class='dx-zoom-c'><img id='dx-zoom-img' alt=''/><span id='dx-zoom-txt'></span></div></div>";
 
   var html = document.documentElement;
@@ -283,7 +325,7 @@
     fn();
     var depois = P[idSel()];
     // animação de evolução quando o clique leva a um estágio posterior da mesma cadeia
-    S.animar = evoluir && antes && depois.id !== antes.id && depois.chain === antes.chain && depois.est > antes.est && S.modo !== 3 ? antes : null;
+    S.animar = evoluir && antes && depois.id !== antes.id && depois.chain === antes.chain && depois.est > antes.est && S.modo < 3 ? antes : null;
     renderSel();
   }
 
@@ -306,6 +348,7 @@
         S.evo = (S.evo === id || (!S.evo && id === idLista())) ? null : id;
       }, true); break;
       case 'forma': mudar(function () { S.forma = idForma() === id ? null : id; }); break;
+      case 'gfil': S.gfil = el.getAttribute('data-f'); renderSel(); break;
       case 'modo': mudar(function () { var m = +el.getAttribute('data-m'); S.modo = S.modo === m && m !== 1 ? 1 : m; }); break;
       case 'lend': S.lend = !S.lend; S.evo = S.forma = null; renderLista(); renderSel(); break;
     }
