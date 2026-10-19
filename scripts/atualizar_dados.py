@@ -1,14 +1,12 @@
-"""Gera a versão web (site estático) do relatório na pasta web/.
+"""Atualiza os dados do site (web/dados/*.js).
 
-Uso:  python _staging/build_web.py            (baixa os dados e monta o site)
-      python _staging/build_web.py --rapido   (reaproveita os dados já baixados em _staging/cache)
+Uso:  python scripts/atualizar_dados.py            (baixa tudo de novo)
+      python scripts/atualizar_dados.py --rapido   (reaproveita o download em scripts/.cache)
 
-Mesmas fontes do Power BI: PokeAPI (GraphQL) e PokemonTCG/pokemon-tcg-data.
-Os dados viram web/dados/*.js; as páginas reaproveitam _staging/js/*.
+Fontes: PokeAPI (GraphQL) e PokemonTCG/pokemon-tcg-data.
 """
 import json
 import re
-import shutil
 import sys
 import time
 import urllib.error
@@ -17,11 +15,113 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
-STAGING = RAIZ / "_staging"
-JS_DIR = STAGING / "js"
-M_DIR = STAGING / "m"
-CACHE = STAGING / "cache"
-WEB = RAIZ / "web"
+CACHE = RAIZ / "scripts" / ".cache"
+DADOS = RAIZ / "web" / "dados"
+
+# tipos: slug da PokeAPI, nome em português e cor (na ordem de exibição)
+TIPOS = [
+    ('normal', 'Normal', '#A8A878'),
+    ('fire', 'Fogo', '#F08030'),
+    ('water', 'Água', '#6890F0'),
+    ('grass', 'Planta', '#78C850'),
+    ('electric', 'Elétrico', '#F8D030'),
+    ('ice', 'Gelo', '#98D8D8'),
+    ('fighting', 'Lutador', '#C03028'),
+    ('poison', 'Venenoso', '#A040A0'),
+    ('ground', 'Terrestre', '#E0C068'),
+    ('flying', 'Voador', '#A890F0'),
+    ('psychic', 'Psíquico', '#F85888'),
+    ('bug', 'Inseto', '#A8B820'),
+    ('rock', 'Pedra', '#B8A038'),
+    ('ghost', 'Fantasma', '#705898'),
+    ('dragon', 'Dragão', '#7038F8'),
+    ('dark', 'Sombrio', '#705848'),
+    ('steel', 'Aço', '#B8B8D0'),
+    ('fairy', 'Fada', '#EE99AC'),
+]
+
+# golpes da Arena: 4 por tipo (forte/médio, físico F / especial E) + prioridade. Precisao 0 = nunca erra.
+GOLPES = [
+    ['normal', 'F', 'forte', 'Pancada Corporal', 85, 100, 0],
+    ['normal', 'E', 'forte', 'Voz Cortante', 90, 100, 0],
+    ['normal', 'F', 'medio', 'Cabeçada', 70, 100, 0],
+    ['normal', 'E', 'medio', 'Meteoro', 60, 0, 0],
+    ['normal', 'F', 'prio', 'Ataque Rápido', 40, 100, 1],
+    ['fire', 'F', 'forte', 'Investida de Chamas', 120, 100, 0],
+    ['fire', 'E', 'forte', 'Lança-chamas', 90, 100, 0],
+    ['fire', 'F', 'medio', 'Presas de Fogo', 65, 95, 0],
+    ['fire', 'E', 'medio', 'Rajada de Fogo', 110, 85, 0],
+    ['water', 'F', 'forte', 'Cachoeira', 80, 100, 0],
+    ['water', 'E', 'forte', 'Hidro Bomba', 110, 80, 0],
+    ['water', 'F', 'medio', 'Rabo Aquático', 90, 90, 0],
+    ['water', 'E', 'medio', 'Surfar', 90, 100, 0],
+    ['water', 'F', 'prio', 'Aqua Jato', 40, 100, 1],
+    ['grass', 'F', 'forte', 'Lâmina de Folha', 90, 100, 0],
+    ['grass', 'E', 'forte', 'Bola de Energia', 90, 100, 0],
+    ['grass', 'F', 'medio', 'Folha Navalha', 55, 95, 0],
+    ['grass', 'E', 'medio', 'Raio Solar', 120, 100, 0],
+    ['electric', 'F', 'forte', 'Carga Selvagem', 90, 100, 0],
+    ['electric', 'E', 'forte', 'Choque do Trovão', 90, 100, 0],
+    ['electric', 'F', 'medio', 'Soco do Trovão', 75, 100, 0],
+    ['electric', 'E', 'medio', 'Trovão', 110, 70, 0],
+    ['ice', 'F', 'forte', 'Queda de Gelo', 85, 90, 0],
+    ['ice', 'E', 'forte', 'Raio de Gelo', 90, 100, 0],
+    ['ice', 'F', 'medio', 'Soco de Gelo', 75, 100, 0],
+    ['ice', 'E', 'medio', 'Nevasca', 110, 70, 0],
+    ['ice', 'F', 'prio', 'Caco de Gelo', 40, 100, 1],
+    ['fighting', 'F', 'forte', 'Combate Corpo a Corpo', 120, 100, 0],
+    ['fighting', 'E', 'forte', 'Esfera de Aura', 80, 0, 0],
+    ['fighting', 'F', 'medio', 'Quebra-Telha', 75, 100, 0],
+    ['fighting', 'E', 'medio', 'Explosão Focalizada', 120, 70, 0],
+    ['fighting', 'F', 'prio', 'Soco Projétil Vácuo', 40, 100, 1],
+    ['poison', 'F', 'forte', 'Lixo Tóxico', 120, 80, 0],
+    ['poison', 'E', 'forte', 'Bomba de Lodo', 90, 100, 0],
+    ['poison', 'F', 'medio', 'Golpe Venenoso', 80, 100, 0],
+    ['poison', 'E', 'medio', 'Onda de Lodo', 95, 100, 0],
+    ['ground', 'F', 'forte', 'Terremoto', 100, 100, 0],
+    ['ground', 'E', 'forte', 'Poder da Terra', 90, 100, 0],
+    ['ground', 'F', 'medio', 'Tremor', 60, 100, 0],
+    ['ground', 'E', 'medio', 'Tiro de Lama', 55, 95, 0],
+    ['flying', 'F', 'forte', 'Pássaro Bravo', 120, 100, 0],
+    ['flying', 'E', 'forte', 'Vendaval', 110, 70, 0],
+    ['flying', 'F', 'medio', 'Ataque de Asa', 60, 100, 0],
+    ['flying', 'E', 'medio', 'Golpe de Ar', 75, 95, 0],
+    ['psychic', 'F', 'forte', 'Cabeçada Zen', 80, 90, 0],
+    ['psychic', 'E', 'forte', 'Psíquico', 90, 100, 0],
+    ['psychic', 'F', 'medio', 'Corte Psíquico', 70, 100, 0],
+    ['psychic', 'E', 'medio', 'Choque Psíquico', 80, 100, 0],
+    ['bug', 'F', 'forte', 'Tesoura X', 80, 100, 0],
+    ['bug', 'E', 'forte', 'Zumbido', 90, 100, 0],
+    ['bug', 'F', 'medio', 'Ida e Volta', 70, 100, 0],
+    ['bug', 'E', 'medio', 'Raio Sinal', 75, 100, 0],
+    ['rock', 'F', 'forte', 'Gume de Pedra', 100, 80, 0],
+    ['rock', 'E', 'forte', 'Gema Poderosa', 80, 100, 0],
+    ['rock', 'F', 'medio', 'Deslize de Pedras', 75, 90, 0],
+    ['rock', 'E', 'medio', 'Poder Ancestral', 60, 100, 0],
+    ['ghost', 'F', 'forte', 'Garra Sombria', 70, 100, 0],
+    ['ghost', 'E', 'forte', 'Bola Sombria', 80, 100, 0],
+    ['ghost', 'F', 'medio', 'Soco Sombrio', 60, 0, 0],
+    ['ghost', 'E', 'medio', 'Maldição', 65, 100, 0],
+    ['ghost', 'F', 'prio', 'Furtividade Sombria', 40, 100, 1],
+    ['dragon', 'F', 'forte', 'Ultraje', 120, 100, 0],
+    ['dragon', 'E', 'forte', 'Pulso do Dragão', 85, 100, 0],
+    ['dragon', 'F', 'medio', 'Garra de Dragão', 80, 100, 0],
+    ['dragon', 'E', 'medio', 'Meteoro do Dragão', 130, 90, 0],
+    ['dark', 'F', 'forte', 'Mastigada', 80, 100, 0],
+    ['dark', 'E', 'forte', 'Pulso Sombrio', 80, 100, 0],
+    ['dark', 'F', 'medio', 'Golpe Baixo', 70, 100, 0],
+    ['dark', 'E', 'medio', 'Rosnado', 55, 95, 0],
+    ['dark', 'F', 'prio', 'Soco Surpresa', 70, 100, 1],
+    ['steel', 'F', 'forte', 'Cabeça de Ferro', 80, 100, 0],
+    ['steel', 'E', 'forte', 'Canhão de Luz', 80, 100, 0],
+    ['steel', 'F', 'medio', 'Garra de Metal', 50, 95, 0],
+    ['steel', 'E', 'medio', 'Raio de Aço', 140, 95, 0],
+    ['steel', 'F', 'prio', 'Soco Projétil', 40, 100, 1],
+    ['fairy', 'F', 'forte', 'Brincadeira Bruta', 90, 90, 0],
+    ['fairy', 'E', 'forte', 'Explosão Lunar', 95, 100, 0],
+    ['fairy', 'F', 'medio', 'Quebra Espírito', 75, 100, 0],
+    ['fairy', 'E', 'medio', 'Brilho Deslumbrante', 80, 100, 0],
+]
 
 GRAPHQL = "https://beta.pokeapi.co/graphql/v1beta"
 TCG = "https://raw.githubusercontent.com/PokemonTCG/pokemon-tcg-data/master/"
@@ -48,11 +148,6 @@ RANKING = ["Mega Hyper Rare", "Hyper Rare", "Special Illustration Rare", "Rare R
            "Trainer Gallery Rare Holo", "Classic Collection", "Pikachu Rare", "MEGA_ATTACK_RARE", "Futuristic Rare",
            "Black White Rare", "Rare Holo", "Promo", "Rare", "Uncommon", "Common"]
 TRADUCAO_RAR = {"Common": "Comum", "Uncommon": "Incomum", "Rare": "Rara", "Rare Holo": "Rara Holo"}
-
-# páginas: (arquivo, título, js/css da página)
-PAGINAS = [("index", "Pokédex", "dex"), ("arena", "Arena", "arena"), ("tipos", "Tipos", "tipos"),
-           ("quiz", "Quiz", "quiz"), ("safari", "Safari", "safari")]
-
 
 # ---------- download ----------
 def baixar(url, dados=None, tentativas=4):
@@ -106,19 +201,8 @@ def limpar(t):
     return " ".join(x for x in re.split(r"[\n\r\f]", t) if x) if t else None
 
 
-def tipos():
-    m = (M_DIR / "Tipos.m").read_text(encoding="utf-8")
-    return re.findall(r'\{"([a-z]+)", "([^"]+)", "(#[0-9A-Fa-f]{6})", (\d+)\}', m)
-
-
-def golpes():
-    m = (M_DIR / "Golpes.m").read_text(encoding="utf-8")
-    return [[t, c, p, n, int(pw), int(ac), int(pr)] for t, c, p, n, pw, ac, pr in
-            re.findall(r'\{"(\w+)", "(\w)", "(\w+)", "([^"]+)", (\d+), (\d+), (\d+)\}', m)]
-
-
 def montar_pokemon(raw):
-    trad = {slug: (nome, cor, int(o)) for slug, nome, cor, o in tipos()}
+    trad = {slug: (nome, cor, i + 1) for i, (slug, nome, cor) in enumerate(TIPOS)}
     tipo_id = {t["id"]: t["name"] for t in raw["t"]}
     regioes = {g["id"]: g["pokemon_v2_region"]["name"] for g in raw["g"]}
 
@@ -172,10 +256,10 @@ def montar_pokemon(raw):
         f = x["damage_factor"] / 100
         if f != 1:
             ef[f"{tipo_id[x['damage_type_id']]}>{tipo_id[x['target_type_id']]}"] = f
-    gp = golpes()
+    gp = GOLPES
     tp = {slug: [nome, cor] for slug, (nome, cor, _) in sorted(trad.items(), key=lambda kv: kv[1][2])}
 
-    # window.ARENA_DADOS: mesmo formato da medida [JS Dados]
+    # window.ARENA_DADOS: base de todas as páginas (lida por web/js/comum.js)
     arena = {
         "v": len(out) * 1000 + len(gp),
         "pk": [[p["id"], p["nome"], p["esp"], p["t1"], p["t2"]] + [s or 1 for s in p["stats"]]
@@ -224,35 +308,10 @@ def montar_cartas(raw):
     }
 
 
-# ---------- site ----------
-PAGINA = """<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{titulo} · Pokédex BI</title>
-<link rel="stylesheet" href="css/comum.css">
-<link rel="stylesheet" href="css/{arq}.css">
-<link rel="stylesheet" href="css/web.css">
-</head>
-<body>
-<div id="htmlContent"><div class="htmlViewerEntry"><div id="app-raiz"></div></div></div>
-{nav}
-{scripts}
-</body>
-</html>
-"""
-
-
-def nav_html(atual):
-    itens = "".join(
-        f"<a href='{arq}.html'{' class=\"on\"' if arq == atual else ''}>{titulo}</a>" for arq, titulo, _ in PAGINAS)
-    return f"<nav id='pk-nav'>{itens}</nav>"
-
-
-def gravar(caminho: Path, texto: str):
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text(texto, encoding="utf-8", newline="\n")
+def gravar(nome, obj):
+    DADOS.mkdir(parents=True, exist_ok=True)
+    texto = f"window.{nome}=" + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + ";\n"
+    (DADOS / f"{nome.split('_')[0].lower()}.js").write_text(texto, encoding="utf-8", newline="\n")
 
 
 def main():
@@ -262,24 +321,10 @@ def main():
     print("Cartas TCG...")
     cartas = montar_cartas(com_cache("tcg.json", cartas_raw))
     print(f"  {len(cartas['c'])} cartas")
-
-    js = lambda nome, obj: f"window.{nome}=" + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + ";\n"
-    gravar(WEB / "dados" / "arena.js", js("ARENA_DADOS", arena))
-    gravar(WEB / "dados" / "dex.js", js("DEX_DADOS", dex))
-    gravar(WEB / "dados" / "cartas.js", js("CARTAS", cartas))
-
-    for f in JS_DIR.iterdir():
-        if f.suffix in (".js", ".css") and not f.name.startswith("teste"):
-            destino = WEB / ("js" if f.suffix == ".js" else "css") / f.name
-            destino.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(f, destino)
-
-    for arq, titulo, pag in PAGINAS:
-        extras = ["dados/dex.js", "dados/cartas.js"] if pag == "dex" else []
-        scripts = "\n".join(f"<script src='{s}'></script>" for s in
-                            ["dados/arena.js"] + extras + ["js/comum.js", f"js/{pag}.js", "js/web.js"])
-        gravar(WEB / f"{arq}.html", PAGINA.format(titulo=titulo, arq=pag, nav=nav_html(arq), scripts=scripts))
-    print("site gravado em", WEB.relative_to(RAIZ))
+    gravar("ARENA_DADOS", arena)
+    gravar("DEX_DADOS", dex)
+    gravar("CARTAS", cartas)
+    print("dados gravados em web/dados")
 
 
 if __name__ == "__main__":

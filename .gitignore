@@ -1,6 +1,9 @@
-**/.pbi/localSettings.json
-**/.pbi/cache.abf
-_staging/backup/
+# relatório Power BI original (fica só local, fora do repositório)
+Pokemon.pbip
+Pokemon.Report/
+Pokemon.SemanticModel/
+_staging/
+
+scripts/.cache/
 __pycache__/
-_staging/cache/
 .claude/
