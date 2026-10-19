@@ -308,6 +308,60 @@ def montar_cartas(raw):
     }
 
 
+# ---------- golpes reais (Arena) ----------
+CONSULTA_GOLPES = (
+    "{ m: pokemon_v2_move(where:{power:{_gt:0}}) { id name power accuracy priority move_damage_class_id type_id "
+    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate } "
+    "n: pokemon_v2_movenames(where:{language_id:{_eq:9}}) { name } } "
+    "p: pokemon_v2_pokemon(order_by:{id:asc}) { id ms: pokemon_v2_pokemonmoves(distinct_on: move_id) { move_id } } }"
+)
+# mecânicas que o motor da Arena não simula: carregar/recarregar, ficar fora um turno, desmaiar quem usa,
+# falhar fora do 1º turno, depender do golpe do alvo ou de condições especiais
+GOLPES_FORA = {
+    "explosion", "self-destruct", "misty-explosion", "mind-blown", "steel-beam", "chloroblast",
+    "hyper-beam", "giga-impact", "blast-burn", "hydro-cannon", "frenzy-plant", "rock-wrecker", "roar-of-time",
+    "prismatic-laser", "eternabeam", "meteor-assault", "solar-beam", "solar-blade", "sky-attack", "razor-wind",
+    "skull-bash", "meteor-beam", "electro-shot", "freeze-shock", "ice-burn", "dig", "fly", "dive", "bounce",
+    "phantom-force", "shadow-force", "sky-drop", "focus-punch", "future-sight", "doom-desire", "last-resort",
+    "belch", "fake-out", "first-impression", "dream-eater", "synchronoise", "burn-up", "double-shock",
+    "shell-trap", "spit-up", "snore", "steel-roller", "ice-spinner", "rising-voltage", "expanding-force",
+    "misty-terrain", "upper-hand", "thunderclap", "hyperspace-fury", "hyperspace-hole", "fling", "natural-gift",
+}
+
+
+def golpes_raw():
+    return baixar(GRAPHQL, json.dumps({"query": CONSULTA_GOLPES}).encode())["data"]
+
+
+def montar_golpes(raw, poke):
+    """window.GOLPES_DADOS: g = golpes [nome, tipo, F/E, poder, precisão (0 = nunca erra), prioridade,
+    acertos mín, acertos máx, dreno % (negativo = recuo), crítico (0 normal, 1 alto, 2 garantido)];
+    a = id do pokémon -> índices em g (formas sem lista usam a da forma padrão, no JS)."""
+    tipo_id = {t["id"]: t["name"] for t in poke["t"]}
+    aprendidos = {}
+    for p in raw["p"]:
+        aprendidos[p["id"]] = {x["move_id"] for x in p["ms"]}
+    usados = set().union(*aprendidos.values())
+    golpes = []
+    for m in raw["m"]:
+        if m["id"] not in usados or m["name"] in GOLPES_FORA or m["type_id"] not in tipo_id or m["move_damage_class_id"] not in (2, 3):
+            continue
+        meta = (m.get("meta") or [{}])[0] or {}
+        nome = m["n"][0]["name"] if m["n"] else proper(m["name"].replace("-", " "))
+        crit = meta.get("crit_rate") or 0
+        golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"],
+                                 m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
+                                 meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0]))
+    golpes.sort(key=lambda x: x[1][0])
+    idx = {mid: i for i, (mid, _) in enumerate(golpes)}
+    a = {}
+    for pid, ms in aprendidos.items():
+        lista = sorted(idx[x] for x in ms if x in idx)
+        if lista:
+            a[pid] = lista
+    return {"g": [g for _, g in golpes], "a": a}
+
+
 def gravar(nome, obj):
     DADOS.mkdir(parents=True, exist_ok=True)
     texto = f"window.{nome}=" + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + ";\n"
@@ -316,8 +370,13 @@ def gravar(nome, obj):
 
 def main():
     print("PokeAPI...")
-    arena, dex = montar_pokemon(com_cache("pokeapi.json", poke_raw))
+    poke = com_cache("pokeapi.json", poke_raw)
+    arena, dex = montar_pokemon(poke)
     print(f"  {len(arena['pk'])} pokémon")
+    print("Golpes...")
+    golpes = montar_golpes(com_cache("golpes.json", golpes_raw), poke)
+    print(f"  {len(golpes['g'])} golpes, {sum(len(x) for x in golpes['a'].values())} aprendizados")
+    gravar("GOLPES_DADOS", golpes)
     print("Cartas TCG...")
     cartas = montar_cartas(com_cache("tcg.json", cartas_raw))
     print(f"  {len(cartas['c'])} cartas")

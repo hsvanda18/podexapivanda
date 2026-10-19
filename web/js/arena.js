@@ -21,7 +21,40 @@
   var G = {};
   D.gp.forEach(function (r) { G[r[0] + '|' + r[1] + '|' + r[2]] = { t: r[0], c: r[1], papel: r[2], nome: r[3], pw: r[4], ac: r[5], pr: r[6] }; });
   function golpe(t, c, papel) { return G[t + '|' + c + '|' + papel] || G[t + '|' + (c === 'F' ? 'E' : 'F') + '|' + papel] || null; }
-  function golpesDe(p) {
+  /* golpes reais (dados/golpes.js): cada Pokémon só usa golpes que aprende nos jogos */
+  var GD = window.GOLPES_DADOS;
+  var GR = GD ? GD.g.map(function (r, i) {
+    return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9] };
+  }) : [];
+  var VERSAO = D.v + '.' + GR.length;
+  function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
+  function aprende(p) {
+    if (!GD) { return []; }
+    var l = GD.a[p.id];
+    if (!l) { var base = LISTA.find(function (x) { return x.esp === p.esp && x.padrao; }); l = base && GD.a[base.id]; }
+    return (l || []).map(function (i) { return GR[i]; });
+  }
+  /* força do golpe nas mãos de p: base da escolha automática e da ordem da lista */
+  function forca(p, g) {
+    var A = g.c === 'F' ? p.b.atk : p.b.spa, stab = p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
+    return g.pw * acertosMedios(g) * stab * A * (g.ac ? g.ac / 100 : 1) * (g.ca === 2 ? 1.5 : g.ca === 1 ? 1.06 : 1) * (g.dr < 0 ? 0.9 : 1);
+  }
+  /* escolha automática: o melhor golpe de cada tipo do Pokémon, depois cobertura de outros tipos */
+  function golpesAuto(p) {
+    var cand = aprende(p).sort(function (a, b) { return forca(p, b) - forca(p, a); });
+    if (!cand.length) { return null; }
+    var out = [], topo = forca(p, cand[0]);
+    p.t.forEach(function (t) { var g = cand.find(function (x) { return x.t === t; }); if (g && out.length < 4) { out.push(g); } });
+    cand.forEach(function (g) { if (out.length < 4 && out.indexOf(g) < 0 && forca(p, g) >= topo * 0.35 && !out.some(function (x) { return x.t === g.t; })) { out.push(g); } });
+    cand.forEach(function (g) { if (out.length < 4 && out.indexOf(g) < 0) { out.push(g); } });
+    return out.map(function (g) { return g.id; });
+  }
+  function golpesDe(p, ids) {
+    var lista = (ids && ids.length ? ids : golpesAuto(p) || []).map(function (i) { return GR[i]; }).filter(Boolean);
+    return lista.length ? lista.slice(0, 4) : golpesGenericos(p);
+  }
+  /* reserva: os golpes por tipo de antes (Pokémon sem lista de golpes de dano, como o Ditto) */
+  function golpesGenericos(p) {
     var cat = p.b.atk >= p.b.spa ? 'F' : 'E', outra = cat === 'F' ? 'E' : 'F', t1 = p.t[0], t2 = p.t[1];
     var lista = [golpe(t1, cat, 'forte'), t2 ? golpe(t2, cat, 'forte') : golpe(t1, outra, 'forte'), golpe(t1, cat, 'medio'),
       G[t1 + '|F|prio'] || (t2 && G[t2 + '|F|prio']) || G['normal|F|prio'], golpe('normal', cat, 'forte'), golpe('normal', cat, 'medio')];
@@ -33,8 +66,8 @@
     var f = function (x) { return Math.floor((2 * x + 31) * NIVEL / 100) + 5; };
     return { hp: Math.floor((2 * b.hp + 31) * NIVEL / 100) + NIVEL + 10, atk: f(b.atk), def: f(b.def), spa: f(b.spa), spd: f(b.spd), spe: f(b.spe) };
   }
-  function lutador(id) { var p = P[id], st = statusDe(p.b); return { p: p, st: st, hpMax: st.hp, hp: st.hp, golpes: golpesDe(p) }; }
-  function novoLado(ids) { return { time: ids.map(lutador), ativo: 0 }; }
+  function lutador(id, ids) { var p = P[id], st = statusDe(p.b); return { p: p, st: st, hpMax: st.hp, hp: st.hp, golpes: golpesDe(p, ids) }; }
+  function novoLado(ids, mv) { return { time: ids.map(function (id) { return lutador(id, mv && mv[id]); }), ativo: 0 }; }
   function ativo(l) { return l.time[l.ativo]; }
   function vivos(l) { return l.time.filter(function (m) { return m.hp > 0; }); }
 
@@ -51,16 +84,22 @@
   }
   function aplicarForma(m, op) {
     var razao = m.hp / m.hpMax;
-    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b); m.hpMax = m.st.hp; m.golpes = golpesDe(op.p);
+    // a Mega mantém os golpes escolhidos; o Gigantamax troca-os pelos golpes Max do mesmo tipo
+    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b); m.hpMax = m.st.hp; m.golpesBase = m.golpes;
     if (op.tipo === 'gmax') {
       m.hpMax *= 2; m.gmax = 3;
-      m.golpes = m.golpes.map(function (g) { return { t: g.t, c: g.c, papel: g.papel, nome: 'Max ' + nomeTipo(g.t), pw: Math.round(g.pw * 1.3), ac: 0, pr: 0 }; });
+      m.golpes = m.golpesBase.map(function (g) { return { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0 }; });
     }
     m.hp = Math.max(1, Math.round(razao * m.hpMax));
   }
+  /* poder dos golpes Max pela faixa do golpe original (como nos jogos, simplificado) */
+  function poderMax(g) {
+    var pw = g.pw * acertosMedios(g);
+    return pw < 45 ? 90 : pw < 55 ? 100 : pw < 65 ? 110 : pw < 75 ? 120 : pw < 110 ? 130 : pw < 150 ? 140 : 150;
+  }
   function desfazerGmax(m) {
     var razao = m.hp / m.hpMax, p = m.base;
-    m.p = p; m.st = statusDe(p.b); m.hpMax = m.st.hp; m.golpes = golpesDe(p); m.gmax = 0; m.base = null; m.forma = null;
+    m.p = p; m.st = statusDe(p.b); m.hpMax = m.st.hp; m.golpes = m.golpesBase || golpesDe(p); m.golpesBase = null; m.gmax = 0; m.base = null; m.forma = null;
     m.hp = m.hp <= 0 ? 0 : Math.max(1, Math.round(razao * m.hpMax));
   }
   function rotuloForma(op) {
@@ -75,14 +114,27 @@
   }
   function calcular(a, d, g) {
     var e = efTotal(g.t, d.p);
-    if (!(g.ac === 0 || rng() * 100 < g.ac)) { return { erro: true, dano: 0, ef: e, crit: false }; }
-    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1, crit = rng() < 1 / 24, variacao = 0.85 + rng() * 0.15;
-    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g) * stab * e * (crit ? 1.5 : 1) * variacao));
-    return { erro: false, dano: dano, ef: e, crit: crit };
+    if (!(g.ac === 0 || rng() * 100 < g.ac)) { return { erro: true, dano: 0, ef: e, crit: false, acertos: 0 }; }
+    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
+    var crit = g.ca === 2 || rng() < (g.ca === 1 ? 1 / 8 : 1 / 24), variacao = 0.85 + rng() * 0.15;
+    var acertos = 1;
+    if (g.hmax > 1) {
+      var r = rng();
+      acertos = g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
+    }
+    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g) * stab * e * (crit ? 1.5 : 1) * variacao)) * acertos;
+    return { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos };
   }
   function esperado(a, d, g) {
-    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
-    return danoBase(a, d, g) * stab * efTotal(g.t, d.p) * (g.ac === 0 ? 1 : g.ac / 100) * 0.925;
+    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1, critMedio = g.ca === 2 ? 1.5 : g.ca === 1 ? 1.0625 : 1.02;
+    return danoBase(a, d, g) * stab * efTotal(g.t, d.p) * (g.ac === 0 ? 1 : g.ac / 100) * acertosMedios(g) * critMedio * 0.925;
+  }
+  /* dreno (cura quem atacou) e recuo (fere quem atacou, sem o derrubar) */
+  function efeitoDreno(a, g, causado) {
+    if (!g.dr || causado <= 0 || a.hp <= 0) { return 0; }
+    var x = Math.max(1, Math.floor(causado * Math.abs(g.dr) / 100));
+    if (g.dr > 0) { x = Math.min(x, a.hpMax - a.hp); a.hp += x; return x; }
+    x = Math.min(x, a.hp - 1); a.hp -= x; return -x;
   }
   function melhorEsperado(a, d) { return Math.max.apply(null, a.golpes.map(function (g) { return esperado(a, d, g); })); }
   function iaGolpe(a, d) {
@@ -135,7 +187,7 @@
     return acoes;
   }
   function simular(idsJ, idsO) {
-    var B = { j: novoLado(idsJ), o: novoLado(idsO) }, turnos = 0;
+    var B = { j: novoLado(idsJ, S.mv.j), o: novoLado(idsO, S.mv.o) }, turnos = 0;
     while (vivos(B.j).length && vivos(B.o).length && turnos < 300) {
       turnos++;
       var acoes = ordem(B, iaAcao(B.j, B.o), iaAcao(B.o, B.j));
@@ -144,7 +196,9 @@
         if (ac.tipo === 'troca') { B[lado].ativo = ac.idx; continue; }
         var a = ativo(B[lado]), d = ativo(B[foe]);
         if (a.hp <= 0) { continue; }
-        d.hp = Math.max(0, d.hp - calcular(a, d, a.golpes[ac.idx]).dano);
+        var gs = a.golpes[ac.idx], antes = d.hp;
+        d.hp = Math.max(0, d.hp - calcular(a, d, gs).dano);
+        efeitoDreno(a, gs, antes - d.hp);
         if (d.hp <= 0) { var r = iaMelhorReserva(B[foe], ativo(B[lado])); if (r >= 0) { B[foe].ativo = r; } break; }
       }
     }
@@ -170,6 +224,7 @@
     S.online = false;
     S.on = { pronto: false, opPronto: false, opQtd: 0, opTime: [], codigo: '', aviso: '', host: false, p: novaPartida() };
   }
+  if (!S.mv) { S.mv = { j: {}, o: {} }; }
   var NET = window.PKOnline;
   function emOnline() { return !!(S.B && S.B.online); }
   function $(id) { return document.getElementById(id); }
@@ -183,7 +238,8 @@
     var p = P[id];
     return `<div class='sl sl-cheio' style='--c:${corTipo(p.t[0])}'>
       <div class='sl-arte'>${K.img([K.URL.arte(id), K.URL.home(id)])}</div>
-      <div class='sl-info'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Total base ${p.total}</span></div>
+      <div class='sl-info'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Total base ${p.total}</span>
+        <div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>${S.mv[l][id] ? 'Golpes ✎' : 'Golpes (auto) ✎'}</em></div></div>
       <i data-acao='tirar' data-lado='${l}' data-i='${i}'>×</i></div>`;
   }
   function colunaHtml(l, titulo) {
@@ -213,7 +269,7 @@
   function previaHtml() {
     var cheio = S.time.j.length === tamanhoTime() && S.time.o.length === tamanhoTime();
     if (!cheio) { return `<span class='pv-dica'>Clique num lado e escolha os Pokémon na grade · nível 50 · golpes definidos pelos tipos</span>`; }
-    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',');
+    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',') + ':' + JSON.stringify(S.mv);
     if (!S.previa || S.previa.chave !== chave) { S.previa = rodarSimulacoes(300); S.previa.chave = chave; }
     var pj = S.previa.j;
     return `<div class='pv'><span class='pv-tit'>PREVISÃO</span>
@@ -247,6 +303,7 @@
       </div>
       ${S.online ? salaHtml() : colunaHtml('o', 'OPONENTE')}
       <div class='sel-rodape'>${rodape}</div>
+      ${S.ge ? editorHtml() : ''}
     </div>`;
   }
   /* coluna da direita no modo online: criar sala, entrar com código ou estado do adversário */
@@ -292,6 +349,71 @@
       S.on.pronto ? (S.on.opPronto ? 'A começar...' : 'À espera que o adversário fique pronto...') : 'Time completo! Carrega em PRONTO';
     return `<span class='pv-dica'>${dica}</span>
       <div class='bt bt-go${ligado && cheio ? '' : ' off'}${S.on.pronto ? ' pronto' : ''}' data-acao='pronto'>${S.on.pronto ? '✓ PRONTO · cancelar' : '⚔ PRONTO'}</div>`;
+  }
+
+
+  /* ================= EDITOR DE GOLPES ================= */
+  function extrasHtml(p, g) {
+    var x = [];
+    if (p.t.indexOf(g.t) >= 0) { x.push("<i class='ge-stab'>STAB</i>"); }
+    if (g.pr > 0) { x.push(`<i>⚡ prioridade +${g.pr}</i>`); }
+    if (g.hmax > 1) { x.push(`<i>${g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax} acertos</i>`); }
+    if (g.dr > 0) { x.push(`<i>drena ${g.dr}%</i>`); }
+    if (g.dr < 0) { x.push(`<i>recuo ${-g.dr}%</i>`); }
+    if (g.ca === 1) { x.push('<i>crítico alto</i>'); }
+    if (g.ca === 2) { x.push('<i>sempre crítico</i>'); }
+    return x.join('');
+  }
+  function geCandidatos() {
+    var p = P[S.ge.id], b = K.normalizar(S.ge.busca);
+    return aprende(p).filter(function (g) {
+      return (!b || K.normalizar(g.nome).indexOf(b) >= 0) && (!S.ge.tipo || g.t === S.ge.tipo) && (!S.ge.cat || g.c === S.ge.cat);
+    }).sort(function (a, c) { return forca(p, c) - forca(p, a); });
+  }
+  function geListaHtml() {
+    var p = P[S.ge.id], cheio = S.ge.ids.length >= 4, lista = geCandidatos();
+    if (!lista.length) { return `<div class='cd-mais'>Nenhum golpe com esses filtros</div>`; }
+    return lista.map(function (g) {
+      var on = S.ge.ids.indexOf(g.id) >= 0;
+      return `<div class='ge-g${on ? ' on' : ''}${cheio && !on ? ' cheio' : ''}' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>
+        ${icone(g.t, 22)}<b>${esc(g.nome)}</b><span class='ge-cat'>${g.c === 'F' ? 'Físico' : 'Especial'}</span>
+        <span class='ge-num'>${g.pw}</span><span class='ge-num'>${g.ac ? g.ac + '%' : '—'}</span><em>${extrasHtml(p, g)}</em></div>`;
+    }).join('');
+  }
+  function editorHtml() {
+    var p = P[S.ge.id], todos = aprende(p), tipos = [];
+    todos.forEach(function (g) { if (tipos.indexOf(g.t) < 0) { tipos.push(g.t); } });
+    tipos.sort(function (a, b) { return K.TIPOS.indexOf(a) - K.TIPOS.indexOf(b); });
+    var slots = [0, 1, 2, 3].map(function (i) {
+      var g = GR[S.ge.ids[i]];
+      return g ? `<div class='ge-sl' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>${icone(g.t, 20)}<b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · ${g.pw}</span><i>×</i></div>`
+        : `<div class='ge-sl vazio'><span>Golpe ${i + 1}</span></div>`;
+    }).join('');
+    var chips = `<span class='gc${S.ge.tipo ? '' : ' on'}' data-acao='geTipo' data-t=''>Todos</span>` + tipos.map(function (t) {
+      return `<span class='tc${S.ge.tipo === t ? ' on' : ''}' data-acao='geTipo' data-t='${t}' title='${nomeTipo(t)}' style='--c:${corTipo(t)}'>${icone(t, 20)}</span>`;
+    }).join('');
+    var cats = [['', 'Todos'], ['F', 'Físicos'], ['E', 'Especiais']].map(function (c) {
+      return `<span class='gc${S.ge.cat === c[0] ? ' on' : ''}' data-acao='geCat' data-c='${c[0]}'>${c[1]}</span>`;
+    }).join('');
+    return `<div class='ge'><div class='ge-box' style='--c:${corTipo(p.t[0])}'>
+      <div class='ge-topo'><div class='ge-arte'>${K.img([K.URL.home(p.id), K.URL.sprite(p.id)])}</div>
+        <div class='ge-tit'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div>
+        <span>Ataque ${p.b.atk} · Atq. Esp. ${p.b.spa} · ${todos.length} golpes de dano que aprende</span></div>
+        <div class='bt bt-sec ge-x' data-acao='geFechar'>✕</div></div>
+      <div class='ge-sls'>${slots}</div>
+      <div class='ge-filtros'><input id='ar-ge-busca' class='busca' placeholder='🔍  Procurar golpe...' value='${esc(S.ge.busca)}'/><div class='gens'>${cats}</div></div>
+      <div class='tcs ge-tipos'>${chips}</div>
+      <div class='ge-cab'><span></span><b>Golpe</b><span>Categoria</span><span class='ge-num'>Poder</span><span class='ge-num'>Precisão</span><em></em></div>
+      <div class='ge-lista' id='ar-ge-lista'>${geListaHtml()}</div>
+      <div class='ge-rodape'><span class='pv-dica'>Toca num golpe para o pôr ou tirar · ${S.ge.ids.length}/4</span>
+        <div class='bt bt-sec' data-acao='geAuto'>🎲 Escolha automática</div>
+        <div class='bt bt-go${S.ge.ids.length ? '' : ' off'}' data-acao='geOk'>✓ Concluir</div></div>
+    </div></div>`;
+  }
+  function geAtualizar() {
+    var l = $('ar-ge-lista'), topo = l ? l.scrollTop : 0;
+    render();
+    var n = $('ar-ge-lista'); if (n) { n.scrollTop = topo; }
   }
 
   /* ================= BATALHA ================= */
@@ -340,7 +462,7 @@
       var tag = e === 0 ? ['nul', 'sem efeito'] : e >= 2 ? ['sup', 'super efetivo ×' + e] : e < 1 ? ['pou', 'pouco efetivo ×' + K.fmtEf(e)] : ['nor', 'normal'];
       return `<div class='gp${trava ? ' off' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
         <div class='gp-ico'>${icone(g.t, 30)}</div>
-        <div class='gp-tx'><b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.pw} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}</span></div>
+        <div class='gp-tx'><b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.pw}${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}</span></div>
         <em class='ef ef-${tag[0]}'>${tag[1]}</em></div>`;
     }).join('');
   }
@@ -417,6 +539,8 @@
     var log = $('ar-log'); if (log) { log.scrollTop = log.scrollHeight; }
     var busca = $('ar-busca');
     if (busca) { busca.addEventListener('input', function () { S.busca = busca.value; $('ar-grade').innerHTML = gradeHtml(); }); }
+    var gb = $('ar-ge-busca');
+    if (gb) { gb.addEventListener('input', function () { S.ge.busca = gb.value; $('ar-ge-lista').innerHTML = geListaHtml(); }); }
     var cod = $('ar-codigo');
     if (cod) {
       cod.addEventListener('input', function () { cod.value = cod.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); S.on.codigo = cod.value; });
@@ -537,6 +661,7 @@
     if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); return false; }
     if (r.ef === 0) { bannerFx('NÃO AFETA', 'nul'); mensagem(`Não afeta ${esc(d.p.nome)}...`); registrar('Não afetou.'); await esperar(800); return false; }
     impacto(foe, g.t, r.ef >= 2 || r.crit);
+    var hpAntes = d.hp;
     d.hp = Math.max(0, d.hp - r.dano);
     var mon = $('mon-' + foe); if (mon) { mon.classList.remove('dano'); void mon.offsetWidth; mon.classList.add('dano'); }
     textoFx('-' + r.dano, 'num' + (r.ef >= 2 ? ' sup' : ''), foe);
@@ -544,6 +669,10 @@
     if (r.ef >= 2) { bannerFx('SUPER EFETIVO!', 'sup'); registrar(`<i class='sup'>Foi super efetivo! (×${r.ef})</i>`); }
     else if (r.ef < 1) { bannerFx('pouco efetivo...', 'pou'); registrar(`<i class='pou'>Não foi muito efetivo...</i>`); }
     await animarHp(foe, d);
+    if (r.acertos > 1) { registrar(`Acertou ${r.acertos} vezes!`); }
+    var dreno = efeitoDreno(a, g, hpAntes - d.hp);
+    if (dreno > 0) { textoFx('+' + dreno, 'num cura', lado); registrar(`<b>${esc(a.p.nome)}</b> recuperou ${dreno} HP.`); await animarHp(lado, a); }
+    else if (dreno < 0) { textoFx(String(dreno), 'num', lado); registrar(`<b>${esc(a.p.nome)}</b> sofreu ${-dreno} de recuo.`); await animarHp(lado, a); }
     if (d.hp <= 0) {
       if (mon) { mon.classList.add('desmaio'); }
       mensagem(`<b>${esc(d.p.nome)}</b> desmaiou!`); registrar(`<b>${esc(d.p.nome)}</b> desmaiou!`);
@@ -635,7 +764,7 @@
     }, 700);
   }
   async function iniciarBatalha(online) {
-    S.B = { j: novoLado(S.time.j), o: novoLado(S.time.o) };
+    S.B = { j: novoLado(S.time.j, S.mv.j), o: novoLado(S.time.o, S.mv.o) };
     if (online) { S.B.online = true; S.B.host = online.host; }
     S.log = ['A batalha começou!']; S.fim = null; S.escolha = null; S.sim = null; S.ocupado = true;
     S.msg = 'A batalha vai começar!'; S.tela = 'batalha'; render();
@@ -737,7 +866,8 @@
   }
   function comecarOnline() {
     // só o anfitrião: sorteia a semente e manda os dois times
-    var cfg = { t: 'inicio', semente: Math.floor(Math.random() * 4294967296), modo: S.modo, times: { host: S.time.j.slice(), conv: S.on.opTime.slice() } };
+    var cfg = { t: 'inicio', semente: Math.floor(Math.random() * 4294967296), modo: S.modo, times: { host: S.time.j.slice(), conv: S.on.opTime.slice() },
+      mv: { host: golpesDoTime(S.time.j, S.mv.j), conv: S.on.opMv || {} } };
     NET.enviar(cfg);
     iniciarOnline(cfg);
   }
@@ -746,6 +876,9 @@
     S.modo = cfg.modo;
     S.time.j = (host ? cfg.times.host : cfg.times.conv).slice();
     S.time.o = (host ? cfg.times.conv : cfg.times.host).slice();
+    var mv = cfg.mv || {};
+    S.mv.j = limparGolpes(host ? mv.host : mv.conv); S.mv.o = limparGolpes(host ? mv.conv : mv.host);
+    S.ge = null;
     S.on.host = host; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     rng = mulberry32(cfg.semente);
     S.auto = false; S.sim = null;
@@ -755,7 +888,7 @@
     if (avisarOutro && emOnline()) { NET.enviar({ t: 'sala' }); }
     rng = Math.random;
     S.tela = 'selecao'; S.B = null; S.fim = null; S.escolha = null; S.ocupado = false; S.auto = false;
-    S.time.o = []; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
+    S.time.o = []; S.mv.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     enviarTime(); render();
   }
   function botaoRevanche() {
@@ -768,15 +901,29 @@
   function revancheOnline() {
     var p = S.on.p;
     if (p.revEu && p.revEle && NET.papel === 'host') {
-      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice();
+      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice(); S.on.opMv = golpesDoTime(S.time.o, S.mv.o);
       comecarOnline();
     }
   }
 
   /* ================= ONLINE: SALA ================= */
+  function golpesDoTime(ids, mv) {
+    var out = {};
+    ids.forEach(function (id) { if (mv[id]) { out[id] = mv[id].slice(0, 4); } });
+    return out;
+  }
+  /* golpes recebidos do outro lado: só índices válidos */
+  function limparGolpes(mv) {
+    var out = {};
+    Object.keys(mv || {}).forEach(function (id) {
+      var l = (mv[id] || []).filter(function (i) { return typeof i === 'number' && GR[i]; }).slice(0, 4);
+      if (l.length) { out[id] = l; }
+    });
+    return out;
+  }
   function enviarTime() {
     if (!S.online || NET.estado !== 'ligado') { return; }
-    NET.enviar({ t: 'time', ids: S.time.j.slice(), pronto: S.on.pronto });
+    NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), pronto: S.on.pronto });
   }
   function talvezComecar() {
     if (NET.papel === 'host' && S.on.pronto && S.on.opPronto && S.time.j.length === tamanhoTime() && S.on.opTime.length === tamanhoTime()) { comecarOnline(); }
@@ -785,14 +932,14 @@
     var p = S.on.p;
     switch (m.t) {
       case 'ola':
-        S.on.aviso = m.v !== D.v ? 'Vocês estão com versões diferentes do site. Recarreguem a página nos dois aparelhos.' : '';
+        S.on.aviso = m.v !== VERSAO ? 'Vocês estão com versões diferentes do site. Recarreguem a página nos dois aparelhos.' : '';
         if (NET.papel === 'host') { NET.enviar({ t: 'modo', m: S.modo }); }
         enviarTime(); if (S.tela !== 'batalha') { render(); } break;
       case 'modo':
         S.modo = m.m; S.time.j = S.time.j.slice(0, tamanhoTime()); S.on.pronto = false; enviarTime();
         if (S.tela !== 'batalha') { render(); } break;
       case 'time':
-        S.on.opTime = m.ids || []; S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
+        S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
         if (S.tela !== 'batalha') { render(); talvezComecar(); } break;
       case 'inicio': iniciarOnline(m); break;
       case 'acao': p.deles[m.n] = m.a; if (emOnline() && !S.ocupado && m.n === p.turno && p.minhas[m.n] == null) { mensagem(msgVez() + ' <i>(o adversário já escolheu)</i>'); } resolverOnline(); break;
@@ -806,7 +953,7 @@
     window.__arenaNet = true;
     NET.aoReceber(function (m) { aoReceber(m); });
     NET.aoMudarEstado(function (estado) {
-      if (estado === 'ligado') { S.on.aviso = ''; NET.enviar({ t: 'ola', v: D.v }); }
+      if (estado === 'ligado') { S.on.aviso = ''; NET.enviar({ t: 'ola', v: VERSAO }); }
       if (estado !== 'ligado') { S.on.opPronto = false; S.on.opTime = []; S.on.opQtd = 0; }
       if (emOnline() && estado !== 'ligado') { var pr = S.on.p; if (pr.esperaTroca) { pr.esperaTroca = null; } }
       if (S.tela !== 'batalha' || (emOnline() && estado !== 'ligado')) { render(); }
@@ -842,6 +989,23 @@
         try { navigator.clipboard.writeText(NET.link()).then(ok, function () { campo.select(); }); } catch (e) { campo.select(); }
         break;
       case 'pronto': S.on.pronto = !S.on.pronto; enviarTime(); render(); talvezComecar(); break;
+      case 'editarGolpes':
+        ev.stopPropagation();
+        var eid = +el.getAttribute('data-id');
+        S.ge = { lado: l, id: eid, ids: golpesDe(P[eid], S.mv[l][eid]).filter(function (g) { return g.id != null; }).map(function (g) { return g.id; }), busca: '', tipo: '', cat: '' };
+        render(); break;
+      case 'geToggle':
+        var gid = +el.getAttribute('data-g'), pos = S.ge.ids.indexOf(gid);
+        if (pos >= 0) { S.ge.ids.splice(pos, 1); } else if (S.ge.ids.length < 4) { S.ge.ids.push(gid); }
+        geAtualizar(); break;
+      case 'geTipo': S.ge.tipo = el.getAttribute('data-t'); geAtualizar(); break;
+      case 'geCat': S.ge.cat = el.getAttribute('data-c'); geAtualizar(); break;
+      case 'geAuto': S.ge.ids = golpesAuto(P[S.ge.id]) || []; geAtualizar(); break;
+      case 'geFechar': S.ge = null; render(); break;
+      case 'geOk':
+        if (S.ge.ids.length) { S.mv[S.ge.lado][S.ge.id] = S.ge.ids.slice(); }
+        if (S.online && S.ge.lado === 'j') { S.on.pronto = false; S.ge = null; enviarTime(); }
+        S.ge = null; S.previa = null; render(); break;
       case 'lado': S.lado = l; render(); break;
       case 'tipo': var t = el.getAttribute('data-t'); S.tipo = S.tipo === t ? '' : t; render(); break;
       case 'gen': S.gen = +el.getAttribute('data-g'); render(); break;

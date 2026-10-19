@@ -14,6 +14,7 @@ Pokédex interativa e animada que roda direto no navegador, sem instalar nada. C
 - **Modos Normal / ✨ Shiny / 🃏 Cartas**, com galeria de cartas e prévia holográfica ao passar o mouse.
 - **Evolução clicável** com animação (silhuetas alternando, raios e clarão) e **formas clicáveis** (Mega X/Y, Gigantamax...).
 - **Arena**: batalhas 1x1 ou Time de 3 com troca, fórmula de dano oficial (nível 50, STAB, tipos, crítico), IA, Mega Evolução e Gigantamax, modo automático e simulação de 1.000 batalhas.
+- **Golpes reais**: cada Pokémon só usa golpes de dano que aprende nos jogos (476 golpes da PokeAPI, nomes em inglês). Dá para escolher os 4 de cada um ou deixar a escolha automática. Funcionam vários acertos, dreno, recuo e crítico alto; golpes com mecânicas que o motor não simula (carregar/recarregar, Explosion, Fly...) ficam de fora.
 - **Arena online (grátis, sem conta)**: no modo 🌐 Online, um jogador cria a sala e manda o link pelo WhatsApp; o outro abre e batalham em tempo real, cada um no seu aparelho. A ligação é direta entre os dois browsers (WebRTC via [PeerJS](https://peerjs.com)); em algumas redes móveis ou de empresa ela pode não abrir, e nesse caso basta tentar pelo Wi-Fi.
 - **Tipos**: roda de tipos com setas animadas, matriz 18×18, ranking das 171 combinações defensivas e calculadora de confronto.
 - **Safari**: minijogo estilo GBA em canvas: ande pelo mato, encontre Pokémon selvagens e capture com Pokébolas (fórmula de captura da 3ª geração).
@@ -28,7 +29,7 @@ Pokédex interativa e animada que roda direto no navegador, sem instalar nada. C
 | `web/` | O site: uma página HTML por aba, `js/` e `css/` de cada página, `dados/` gerados |
 | `web/js/comum.js` | Base compartilhada (dados, tipos, imagens, escala do palco 1280×720) |
 | `web/js/online.js` | Ligação P2P da Arena online (salas, mensagens, queda de ligação) |
-| `scripts/atualizar_dados.py` | Baixa PokeAPI + cartas TCG e grava `web/dados/*.js` |
+| `scripts/atualizar_dados.py` | Baixa PokeAPI (Pokémon e golpes) + cartas TCG e grava `web/dados/*.js` |
 | `.github/workflows/pages.yml` | Publica `web/` no GitHub Pages a cada push na `main` |
 
 ## Rodar localmente
