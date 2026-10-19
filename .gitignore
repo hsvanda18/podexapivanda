@@ -1,0 +1,6 @@
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+_staging/backup/
+__pycache__/
+_staging/cache/
+.claude/
