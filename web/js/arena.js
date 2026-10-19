@@ -238,8 +238,8 @@
     var p = P[id];
     return `<div class='sl sl-cheio' style='--c:${corTipo(p.t[0])}'>
       <div class='sl-arte'>${K.img([K.URL.arte(id), K.URL.home(id)])}</div>
-      <div class='sl-info'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Total base ${p.total}</span>
-        <div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>${S.mv[l][id] ? 'Golpes ✎' : 'Golpes (auto) ✎'}</em></div></div>
+      <div class='sl-info'><b title='${esc(p.nome)}'>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Total base ${p.total}</span></div>
+        <div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>✎ Golpes</em>${S.mv[l][id] ? '' : '<small>auto</small>'}</div>
       <i data-acao='tirar' data-lado='${l}' data-i='${i}'>×</i></div>`;
   }
   function colunaHtml(l, titulo) {

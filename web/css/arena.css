@@ -293,9 +293,18 @@
 .sala-turn.on { color: #3DDC97; }
 
 /* ---------- golpes escolhidos no slot ---------- */
-.sl-gps { display: inline-flex; align-items: center; gap: 3px; margin-top: 6px; padding: 3px 8px 3px 5px; border-radius: 999px; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12); cursor: pointer; }
-.sl-gps:hover { background: rgba(255,255,255,.14); border-color: #FFCB05; }
-.sl-gps em { font-style: normal; font-size: 10px; font-weight: 800; color: #E9ECF2; margin-left: 3px; }
+.sl-info { flex: 1 1 0; min-width: 0; }
+.sel-slots.m1 .sl-info { flex: 0 0 auto; }
+.sl-info b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px; }
+.sel-slots.m1 .sl-info b { padding-right: 0; }
+.sel-slots.m3 .sl-arte, .sel-slots.m3 .sl-arte img { width: 84px; height: 84px; }
+.sel-slots .sl-cheio { flex-wrap: wrap; align-content: center; row-gap: 6px; }
+.sl-gps { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 2px; width: 100%; box-sizing: border-box; margin: 0; padding: 4px 9px 4px 6px; border-radius: 999px; background: rgba(0,0,0,.35); border: 1px solid rgba(255,255,255,.16); cursor: pointer; white-space: nowrap; transition: border-color .12s, background .12s; }
+.sel-slots.m1 .sl-gps { width: auto; margin: 4px auto 0; }
+.sl-gps:hover { background: rgba(0,0,0,.5); border-color: #FFCB05; }
+.sl-gps .pk-ico { flex: 0 0 auto; }
+.sl-gps em { font-style: normal; font-size: 10px; font-weight: 800; color: #fff; margin-left: 5px; }
+.sl-gps small { font-size: 8.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #11151D; background: #8A93A3; padding: 1px 5px; border-radius: 999px; margin-left: 4px; }
 
 /* ---------- editor de golpes ---------- */
 .ge { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(5,7,10,.72); }
