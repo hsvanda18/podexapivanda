@@ -311,7 +311,7 @@ def montar_cartas(raw):
 # ---------- golpes reais (Arena) ----------
 CONSULTA_GOLPES = (
     "{ m: pokemon_v2_move(where:{power:{_gt:0}}) { id name power accuracy priority pp move_damage_class_id type_id "
-    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id } "
+    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id move_meta_ailment_id ailment_chance flinch_chance } "
     "sc: pokemon_v2_movemetastatchanges { change stat_id } "
     "n: pokemon_v2_movenames(where:{language_id:{_eq:9}}) { name } } "
     "p: pokemon_v2_pokemon(order_by:{id:asc}) { id ms: pokemon_v2_pokemonmoves(distinct_on: move_id) { move_id } } }"
@@ -340,12 +340,28 @@ EFEITOS_EXTRA = {"make-it-rain": ["u", 100, [["spa", -1]]]}
 ESPECIAIS = {"eruption": "hp", "water-spout": "hp", "dragon-energy": "hp",
              "outrage": "furia", "thrash": "furia", "petal-dance": "furia", "raging-fury": "furia"}
 STATS = {2: "atk", 3: "def", 4: "spa", 5: "spd", 6: "spe"}
+# estados (move_meta_ailment_id): 1 paralisia, 2 sono, 3 congelamento, 4 queimadura, 5 veneno, 6 confusão
+ESTADOS = {1: "par", 2: "slp", 3: "frz", 4: "brn", 5: "psn", 6: "conf"}
+# estados que a PokeAPI não descreve (ou descreve como "aleatório")
+ESTADOS_EXTRA = {"tri-attack": ["tri", 20], "dire-claw": ["dire", 50], "mortal-spin": ["psn", 100],
+                 "poison-fang": ["tox", 50], "malignant-chain": ["tox", 50], "barb-barrage": ["psn", 50],
+                 "infernal-parade": ["brn", 30], "wildbolt-storm": ["par", 20], "sandsear-storm": ["brn", 20],
+                 "axe-kick": ["conf", 30], "matcha-gotcha": ["brn", 20]}
+RECUO_EXTRA = {"triple-arrows": 30}
+
+
+def estado_golpe(m, meta):
+    if m["name"] in ESTADOS_EXTRA:
+        return ESTADOS_EXTRA[m["name"]]
+    e = ESTADOS.get(meta.get("move_meta_ailment_id") or 0)
+    return [e, meta.get("ailment_chance") or 100] if e else 0
 
 
 def montar_golpes(raw, poke):
     """window.GOLPES_DADOS: g = golpes [nome, tipo, F/E, poder, precisão (0 = nunca erra), prioridade,
     acertos mín, acertos máx, dreno % (negativo = recuo), crítico (0 normal, 1 alto, 2 garantido),
-    PP, efeito nos atributos [quem ('u' quem usa, 'a' alvo), chance %, [[atributo, estágios]...]] ou 0, especial ('hp', 'furia' ou '')];
+    PP, efeito nos atributos [quem ('u' quem usa, 'a' alvo), chance %, [[atributo, estágios]...]] ou 0, especial ('hp', 'furia' ou ''),
+    estado no alvo [par|slp|frz|brn|psn|tox|conf|tri|dire, chance %] ou 0, chance % de fazer recuar];
     a = id do pokémon -> índices em g (formas sem lista usam a da forma padrão, no JS)."""
     tipo_id = {t["id"]: t["name"] for t in poke["t"]}
     aprendidos = {}
@@ -362,7 +378,8 @@ def montar_golpes(raw, poke):
         golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"],
                                  m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
                                  meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0,
-                                 m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"], "")]))
+                                 m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"], ""),
+                                 estado_golpe(m, meta), RECUO_EXTRA.get(m["name"], meta.get("flinch_chance") or 0)]))
     golpes.sort(key=lambda x: x[1][0])
     idx = {mid: i for i, (mid, _) in enumerate(golpes)}
     a = {}

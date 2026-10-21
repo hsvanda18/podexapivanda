@@ -446,3 +446,14 @@
 @keyframes terreno-el { to { background-position: 0 0, 300px 0; } }
 @keyframes terreno-psi { to { background-position: 0 0, 60px -60px; } }
 @keyframes terreno-pulso { from { opacity: .65; } to { opacity: 1; } }
+
+/* ---------- estados ---------- */
+.hud-est i.st { color: #fff; }
+.hud-est i.st-brn, .st-mini.st-brn { background: #E2582C; }
+.hud-est i.st-par, .st-mini.st-par { background: #C9A400; }
+.hud-est i.st-psn, .hud-est i.st-tox, .st-mini.st-psn, .st-mini.st-tox { background: #9B4FC0; }
+.hud-est i.st-slp, .st-mini.st-slp { background: #6B7690; }
+.hud-est i.st-frz, .st-mini.st-frz { background: #3FA9D8; }
+.hud-est i.st-conf { background: #C0508A; }
+.st-mini { font-style: normal; font-size: 8px; font-weight: 900; color: #fff; padding: 1px 5px; border-radius: 4px; vertical-align: 1px; }
+.ge-g em i.ge-st { color: #fff; background: rgba(226,88,44,.55); }
