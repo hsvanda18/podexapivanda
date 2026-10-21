@@ -368,6 +368,12 @@ DEFESA = {"protect": "proteger", "detect": "proteger", "kings-shield": "escudo-r
           "baneful-bunker": "bunker", "silk-trap": "seda", "burning-bulwark": "muralha", "obstruct": "obstruir",
           "endure": "aguentar", "reflect": "reflect", "light-screen": "light-screen", "aurora-veil": "aurora",
           "substitute": "substituto"}
+# controlo e armadilhas
+CONTROLO = {"haze": "haze", "taunt": "taunt", "roar": "roar", "whirlwind": "roar", "leech-seed": "semente",
+            "stealth-rock": "rochas", "spikes": "picos", "toxic-spikes": "picos-toxicos", "sticky-web": "teia",
+            "defog": "defog", "tidy-up": "limpar"}
+# golpes de dano com regra própria: limpam as armadilhas do próprio lado ou obrigam o alvo a trocar
+DANO_ESP = {"rapid-spin": "giro", "mortal-spin": "giro", "dragon-tail": "arrastar", "circle-throw": "arrastar"}
 # devolvem o dano recebido neste turno
 DEVOLVE = {"counter": "counter", "mirror-coat": "mirror", "metal-burst": "metal", "comeuppance": "metal"}
 CURA_CLIMA = {"synthesis": "cura-sol", "moonlight": "cura-sol", "morning-sun": "cura-sol", "shore-up": "cura-areia"}
@@ -387,7 +393,7 @@ def golpe_estado(m, meta, tipo):
     nome, alvo = m["name"], m.get("move_target_id")
     if nome in ESTADO_FORA:
         return None
-    esp = CLIMA_GOLPE.get(nome) or CURA_CLIMA.get(nome) or DEFESA.get(nome) or ("rest" if nome == "rest" else "")
+    esp = CLIMA_GOLPE.get(nome) or CURA_CLIMA.get(nome) or DEFESA.get(nome) or CONTROLO.get(nome) or ("rest" if nome == "rest" else "")
     mud = [[STATS[x["stat_id"]], x["change"]] for x in (m.get("sc") or []) if x["stat_id"] in STATS]
     ef = 0
     if mud and (alvo in ALVO_PROPRIO or alvo in ALVO_ADVERSARIO):
@@ -430,7 +436,7 @@ def montar_golpes(raw, poke):
         golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"] or 0,
                                  m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
                                  meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0,
-                                 m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"]) or DEVOLVE.get(m["name"], ""),
+                                 m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"]) or DEVOLVE.get(m["name"]) or DANO_ESP.get(m["name"], ""),
                                  estado_golpe(m, meta), RECUO_EXTRA.get(m["name"], meta.get("flinch_chance") or 0), 0]))
     golpes.sort(key=lambda x: x[1][0])
     idx = {mid: i for i, (mid, _) in enumerate(golpes)}

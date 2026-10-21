@@ -461,3 +461,6 @@
 .ef.ef-est { background: rgba(120,140,255,.22); color: #C9D2FF; }
 
 .hud-est i.tela { background: rgba(120,180,255,.2); color: #BFDBFF; }
+
+.hud-est i.risco { background: rgba(200,160,90,.22); color: #F2D6A2; }
+.hud-est i.st-semente { background: #4E9A3A; }

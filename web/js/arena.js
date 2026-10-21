@@ -40,7 +40,7 @@
     });
     return out;
   }
-  var VERSAO = D.v + '.' + GR.length + '.r8';
+  var VERSAO = D.v + '.' + GR.length + '.r9';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -73,6 +73,9 @@
     if (PROTECAO[g.esp]) { v += hAuto === 'speed-boost' ? 0.6 : 0.2; }
     if (g.esp === 'reflect' || g.esp === 'light-screen') { v += defensivo ? 0.5 : 0.25; }
     if (g.esp === 'substituto') { v += defensivo ? 0.4 : 0.3; }
+    if (RISCO[g.esp]) { v += (g.esp === 'rochas' ? 0.35 : 0.25) + (defensivo ? 0.15 : 0); }
+    if (g.esp === 'semente') { v += defensivo ? 0.5 : 0.4; }
+    if (g.esp === 'taunt' || g.esp === 'roar' || g.esp === 'haze' || g.esp === 'defog') { v += 0.25; }
     return v * (g.ac ? g.ac / 100 : 1);
   }
   function golpesAuto(p) {
@@ -375,6 +378,12 @@
     lados.forEach(function (l) {
       var m = ativo(B[l]), h = hab(m), nome = `<b>${esc(m.p.nome)}</b>`;
       m.recuar = false;
+      if (m.hp > 0 && m.provocado > 0) { m.provocado--; if (!m.provocado) { P.push({ tipo: 'txt', txt: nome + ' já não está provocado.' }); } }
+      if (m.hp > 0 && m.semente && h !== 'magic-guard') {
+        var x = Math.min(m.hp, Math.max(1, Math.floor(m.hpMax / 8))), o = ativo(B[l === 'j' ? 'o' : 'j']);
+        perderHp(m, x, nome + ' perdeu {x} HP para a semente.', P);
+        if (o.hp > 0) { if (h === 'liquid-ooze') { mexerHp(o, -x, `<b>${esc(o.p.nome)}</b> absorveu lodo e perdeu {x} HP.`, P); } else { mexerHp(o, x, `<b>${esc(o.p.nome)}</b> recuperou {x} HP.`, P); } }
+      }
       if (m.hp <= 0 || !m.estado) { return; }
       if ((h === 'shed-skin' && rng() < 1 / 3) || (h === 'hydration' && clima(m) === 'chuva')) { anunciar(m, P); m.estado = null; m.sono = 0; P.push({ tipo: 'txt', txt: nome + ' curou-se.' }); return; }
       if (h === 'magic-guard') { return; }
@@ -399,7 +408,9 @@
   function ligarCampo(B, c) {
     var tl = function (x) { return { reflect: (x && x.reflect) || 0, luz: (x && x.luz) || 0, veu: (x && x.veu) || 0 }; };
     B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, terreno: (c && c.terreno) || null, tturnos: (c && c.tturnos) || 0,
-      tela: { j: tl(c && c.tela && c.tela.j), o: tl(c && c.tela && c.tela.o) }, B: B };
+      tela: { j: tl(c && c.tela && c.tela.j), o: tl(c && c.tela && c.tela.o) }, B: B, arrastado: {} };
+    var rk = function (x) { return { rochas: (x && x.rochas) || 0, picos: (x && x.picos) || 0, toxicos: (x && x.toxicos) || 0, teia: (x && x.teia) || 0 }; };
+    B.campo.risco = { j: rk(c && c.risco && c.risco.j), o: rk(c && c.risco && c.risco.o) };
     ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.campo = B.campo; }); });
     return B;
   }
@@ -570,6 +581,7 @@
   function aoEntrar(m, foe, P) {
     var h = hab(m);
     if (m.hp <= 0) { return P; }
+    aplicarRiscos(m, foe, P);
     if (h === 'trace' && foe && foe.hp > 0 && hab(foe) && !NAO_COPIA[hab(foe)]) {
       anunciar(m, P); m.hab = hab(foe); P.push({ tipo: 'txt', txt: `<b>${esc(m.p.nome)}</b> copiou ${esc(nomeHab(m.hab))}!` }); h = m.hab;
     }
@@ -593,7 +605,7 @@
     if (m.hp > 0 && hab(m) === 'regenerator') { mexerHp(m, Math.floor(m.hpMax / 3), `<b>${esc(m.p.nome)}</b> regenerou {x} HP.`, P || []); }
     if (m.hp > 0 && m.estado && hab(m) === 'natural-cure') { m.estado = null; m.sono = 0; }
     m.est = zeroEst(); m.preso = null; m.descansa = false; m.turnos = 0; m.flash = false; m.novo = true; m.hab = m.habBase || m.hab;
-    m.conf = 0; m.recuar = false; m.toxN = 0; m.sub = 0; m.protUsos = 0; m.protegido = null; m.aguentar = false; m.recebido = null;
+    m.conf = 0; m.recuar = false; m.toxN = 0; m.semente = false; m.provocado = 0; m.sub = 0; m.protUsos = 0; m.protegido = null; m.aguentar = false; m.recebido = null;
   }
 
   /* ---------- Mega Evolução e Gigantamax: só quem leva o item, uma vez por time ---------- */
@@ -803,6 +815,7 @@
     if (hab(a) === 'truant') { a.descansa = true; }
     if (a.preso) { idx = a.preso.idx; }
     if (!a.pp.some(function (x) { return x > 0; })) { return { g: LUTA, idx: -1 }; }
+    if (a.provocado > 0 && a.golpes[idx] && a.golpes[idx].c === 'S') { return { provocado: true, g: a.golpes[idx] }; }
     if (!(a.pp[idx] > 0)) { idx = a.pp.findIndex(function (x) { return x > 0; }); }
     a.pp[idx] = Math.max(0, a.pp[idx] - (d && hab(d) === 'pressure' ? 2 : 1));
     var ge = a.golpes[idx];
@@ -818,6 +831,7 @@
   /* no início de cada turno: proteções, Endure, dano recebido e "já agiu" voltam ao normal */
   function limparTurno(B) {
     ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.protegido = null; m.aguentar = false; m.recebido = null; m.agiu = false; }); });
+    if (B.campo) { B.campo.arrastado = {}; }
   }
   /* o alvo está protegido? (Unseen Fist atravessa com golpes físicos; algumas proteções deixam passar golpes de estado) */
   function bloqueadoPorProtecao(a, d, g, P) {
@@ -870,9 +884,44 @@
     return P;
   }
 
+  /* ---------- controlo e armadilhas: Haze, Taunt, Roar/Whirlwind, Leech Seed; Stealth Rock, Spikes, Toxic Spikes, Sticky Web ---------- */
+  var ALVO_ESP = { taunt: 1, roar: 1, semente: 1 };
+  var RISCO = { rochas: 1, picos: 1, 'picos-toxicos': 1, teia: 1 };
+  function riscoDe(m) { var c = m && m.campo; return c && c.risco ? c.risco[ladoM(m)] : null; }
+  function temRisco(rk) { return !!(rk && (rk.rochas || rk.picos || rk.toxicos || rk.teia)); }
+  function reservasDe(m) {
+    var B = m && m.campo && m.campo.B; if (!B) { return []; }
+    var l = B[ladoM(m)], out = []; l.time.forEach(function (x, i) { if (x.hp > 0 && i !== l.ativo) { out.push(i); } }); return out;
+  }
+  function somaSubidas(m) { return Object.keys(m.est || {}).reduce(function (t, k) { return t + Math.max(0, m.est[k]); }, 0); }
+  /* obriga d a trocar por um Pokémon ao acaso do time (Roar, Whirlwind, Dragon Tail...) */
+  function arrastarAlvo(d, P) {
+    var res = reservasDe(d);
+    if (!res.length || hab(d) === 'suction-cups' || hab(d) === 'guard-dog' || d.gmax > 0) { return false; }
+    var idx = res[Math.floor(rng() * res.length)];
+    P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> foi obrigado a voltar!` }); P.push({ tipo: 'troca', m: d, idx: idx });
+    return true;
+  }
+  function extrairTroca(P) { var i = P.findIndex(function (x) { return x.tipo === 'troca'; }); return i >= 0 ? P.splice(i, 1)[0] : null; }
+  /* ao entrar: as armadilhas do lado de m (nunca derrubam) */
+  function aplicarRiscos(m, foe, P) {
+    var rk = riscoDe(m), nome = `<b>${esc(m.p.nome)}</b>`;
+    if (!temRisco(rk) || m.hp <= 0) { return; }
+    if (hab(m) !== 'magic-guard') {
+      if (rk.rochas) { mexerHp(m, -Math.max(1, Math.floor(m.hpMax * K.efTotal('rock', tiposDe(m)) / 8)), nome + ' foi ferido pelas pedras afiadas ({x}).', P); }
+      if (rk.picos && noChao(m)) { mexerHp(m, -Math.max(1, Math.floor(m.hpMax * [0, 1 / 8, 1 / 6, 1 / 4][rk.picos])), nome + ' foi ferido pelos picos ({x}).', P); }
+    }
+    if (rk.toxicos && noChao(m)) {
+      if (tiposDe(m).indexOf('poison') >= 0) { rk.toxicos = 0; P.push({ tipo: 'txt', txt: nome + ' absorveu os picos venenosos!' }); }
+      else { aplicarEstado(m, rk.toxicos >= 2 ? 'tox' : 'psn', null, P); }
+    }
+    if (rk.teia && noChao(m)) { P.push({ tipo: 'txt', txt: nome + ' ficou preso na teia!' }); alterar(m, 'spe', -1, foe, P); }
+  }
+  function limparRiscos(rk) { if (rk) { rk.rochas = rk.picos = rk.toxicos = rk.teia = 0; } }
+
   /* ---------- golpes de estado e de reforço ---------- */
   var POS = /^(Spore|Sleep Powder|Stun Spore|Poison Powder|Cotton Spore)$/;
-  function alvoAdversario(g) { return !!((g.ef && g.ef[0] === 'a') || g.st); }
+  function alvoAdversario(g) { return !!((g.ef && g.ef[0] === 'a') || g.st || ALVO_ESP[g.esp]); }
   /* porque é que um golpe de estado no adversário não teria efeito ('' = funciona) */
   function falhaEstado(a, d, g) {
     if (!alvoAdversario(g)) { return ''; }
@@ -886,14 +935,25 @@
   }
   function podeDormirRest(m) { var e = m.estado; m.estado = null; var ok = podeTerEstado(m, 'slp', null); m.estado = e; return ok; }
   function usarEstado(a, d, g, P) {
-    if (alvoAdversario(g) && bloqueadoPorProtecao(a, d, g, P)) { return; }
-    if (alvoAdversario(g) && d.sub > 0 && hab(a) !== 'infiltrator' && !SOM.test(g.nome)) { P.push({ tipo: 'txt', txt: 'Mas falhou! (o substituto protegeu-o)' }); return; }
+    // Roar e Whirlwind atravessam o Protect e o substituto; Taunt atravessa o substituto
+    if (alvoAdversario(g) && g.esp !== 'roar' && bloqueadoPorProtecao(a, d, g, P)) { return; }
+    if (alvoAdversario(g) && g.esp !== 'roar' && g.esp !== 'taunt' && d.sub > 0 && hab(a) !== 'infiltrator' && !SOM.test(g.nome)) { P.push({ tipo: 'txt', txt: 'Mas falhou! (o substituto protegeu-o)' }); return; }
     if (alvoAdversario(g)) {
       if (habAlvo(a, d) === 'magic-bounce' && d.hp > 0) { anunciar(d, P); P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> devolveu o golpe!` }); var t = a; a = d; d = t; }
       var f = falhaEstado(a, d, g);
       if (f) { if (f === 'hab') { anunciar(d, P); } P.push({ tipo: 'txt', txt: `Não afeta <b>${esc(d.p.nome)}</b>.` }); return; }
       var ac = precisaoDe(a, d, g);
       if (!(ac === 0 || rng() * 100 < ac)) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+      var alvoNome = `<b>${esc(d.p.nome)}</b>`;
+      if (g.esp === 'roar') { if (!arrastarAlvo(d, P)) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); } return; }
+      if (g.esp === 'taunt') {
+        if (d.provocado > 0 || hab(d) === 'oblivious' || hab(d) === 'aroma-veil') { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+        d.provocado = 3; P.push({ tipo: 'txt', txt: alvoNome + ' foi provocado: só pode usar golpes de dano (3 turnos)!' }); return;
+      }
+      if (g.esp === 'semente') {
+        if (d.semente || tiposDe(d).indexOf('grass') >= 0) { P.push({ tipo: 'txt', txt: `Não afeta ${alvoNome}.` }); return; }
+        d.semente = true; P.push({ tipo: 'txt', txt: alvoNome + ' foi semeado!' }); return;
+      }
       if (g.ef) { g.ef[2].forEach(function (x) { alterar(d, x[0], x[1], a, P); }); }
       if (g.st && !aplicarEstado(d, g.st[0], a, P) && !g.ef) { P.push({ tipo: 'txt', txt: `Não teve efeito em <b>${esc(d.p.nome)}</b>.` }); }
       return;
@@ -913,6 +973,27 @@
       if (!tl || tl[k] > 0 || (k === 'veu' && clima(a) !== 'neve')) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
       tl[k] = 5;
       P.push({ tipo: 'txt', txt: { reflect: 'Reflect: os golpes físicos fazem metade do dano', luz: 'Light Screen: os golpes especiais fazem metade do dano', veu: 'Aurora Veil: todos os golpes fazem metade do dano' }[k] + ` ao lado de ${nome} (5 turnos).` });
+      return;
+    }
+    if (g.esp === 'haze') { a.est = zeroEst(); d.est = zeroEst(); P.push({ tipo: 'txt', txt: 'Todas as mudanças de atributos foram eliminadas!' }); return; }
+    if (RISCO[g.esp]) {
+      var rk = riscoDe(d), quem = `à volta de <b>${esc(d.p.nome)}</b>`;
+      if (!rk) { return; }
+      if (g.esp === 'rochas') { if (rk.rochas) { falhou = true; } else { rk.rochas = 1; P.push({ tipo: 'txt', txt: `Pedras afiadas espalharam-se ${quem}!` }); } }
+      if (g.esp === 'picos') { if (rk.picos >= 3) { falhou = true; } else { rk.picos++; P.push({ tipo: 'txt', txt: `Picos espalharam-se ${quem} (×${rk.picos})!` }); } }
+      if (g.esp === 'picos-toxicos') { if (rk.toxicos >= 2) { falhou = true; } else { rk.toxicos++; P.push({ tipo: 'txt', txt: `Picos venenosos espalharam-se ${quem} (×${rk.toxicos})!` }); } }
+      if (g.esp === 'teia') { if (rk.teia) { falhou = true; } else { rk.teia = 1; P.push({ tipo: 'txt', txt: `Uma teia pegajosa espalhou-se ${quem}!` }); } }
+      if (falhou) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); }
+      return;
+    }
+    if (g.esp === 'defog' || g.esp === 'limpar') {
+      var algo = temRisco(riscoDe(a)) || temRisco(riscoDe(d));
+      limparRiscos(riscoDe(a)); limparRiscos(riscoDe(d));
+      if (g.esp === 'defog') {
+        var td = telaDe(d); if (td && (td.reflect || td.luz || td.veu)) { td.reflect = td.luz = td.veu = 0; algo = true; }
+        if (a.campo && a.campo.terreno) { a.campo.terreno = null; a.campo.tturnos = 0; algo = true; }
+      } else { if (a.sub || d.sub) { algo = true; } a.sub = 0; d.sub = 0; }
+      P.push({ tipo: 'txt', txt: algo ? (g.esp === 'defog' ? 'O vento levou as armadilhas e as barreiras!' : 'O campo ficou arrumado!') : 'Não havia nada para limpar.' });
       return;
     }
     if (g.esp === 'substituto') {
@@ -980,6 +1061,23 @@
       if (g.esp === 'light-screen') { return tl.luz || tl.veu ? 0 : esp * 1.2; }
       return clima(a) !== 'neve' || tl.veu ? 0 : Math.max(fis, esp) * 1.3;
     }
+    var resD = reservasDe(d).length, resA = reservasDe(a).length;
+    if (RISCO[g.esp]) {
+      var rk = riscoDe(d); if (!rk || !resD || !aguenta) { return 0; }
+      if (g.esp === 'rochas') { return rk.rochas ? 0 : melhor * 0.3 * resD; }
+      if (g.esp === 'picos') { return rk.picos >= 3 ? 0 : melhor * 0.18 * resD; }
+      if (g.esp === 'picos-toxicos') { return rk.toxicos >= 2 ? 0 : melhor * 0.15 * resD; }
+      return rk.teia ? 0 : melhor * 0.12 * resD;
+    }
+    if (g.esp === 'defog' || g.esp === 'limpar') {
+      var td = telaDe(d);
+      v += (temRisco(riscoDe(a)) && resA ? melhor * 0.5 : 0) + (g.esp === 'defog' && td && (td.reflect || td.luz || td.veu) ? melhor * 0.4 : 0) - (temRisco(riscoDe(d)) ? melhor * 0.2 : 0);
+      return Math.max(0, v);
+    }
+    if (g.esp === 'haze') { var dif = somaSubidas(d) - somaSubidas(a); return dif >= 2 ? melhor * 0.35 * dif : 0; }
+    if (g.esp === 'taunt') { return !(d.provocado > 0) && hab(d) !== 'oblivious' && d.golpes.some(function (x) { return x.c === 'S'; }) ? melhor * 0.5 : 0; }
+    if (g.esp === 'roar') { return resD && !d.gmax ? melhor * (0.35 * somaSubidas(d) + (d.sub > 0 ? 0.5 : 0) + (temRisco(riscoDe(d)) ? 0.25 : 0)) : 0; }
+    if (g.esp === 'semente') { return d.semente || tiposDe(d).indexOf('grass') >= 0 || d.sub > 0 || !aguenta ? 0 : d.hpMax / 8 * 3; }
     if (g.esp === 'substituto') {
       if (a.sub > 0 || a.hp <= a.hpMax / 2) { return 0; }
       return (ameaca < a.hpMax / 4 ? melhor * 0.6 : 0) + (d.golpes.some(function (x) { return x.c === 'S' && alvoAdversario(x); }) ? melhor * 0.4 : 0);
@@ -1086,6 +1184,8 @@
       }
       if (causado > 0 && !r.sub) { d.recebido = { c: g.c, dano: causado }; reacoes(a, d, g, r, causado, P); }
       if (d.hp <= 0) { aoDerrubar(a, P); }
+      if (g.esp === 'giro' && a.hp > 0 && (temRisco(riscoDe(a)) || a.semente)) { limparRiscos(riscoDe(a)); a.semente = false; P.push({ tipo: 'txt', txt: `<b>${esc(a.p.nome)}</b> livrou-se das armadilhas!` }); }
+      if (g.esp === 'arrastar' && !r.sub && d.hp > 0 && a.hp > 0) { arrastarAlvo(d, P); }
     }
     if (g.esp === 'furia') {
       if (r.erro || r.ef === 0) { a.preso = null; }
@@ -1136,7 +1236,7 @@
   /* ---------- IA ---------- */
   function golpesDisponiveis(a) {
     if (a.preso) { return [a.preso.idx]; }
-    var l = []; a.pp.forEach(function (x, i) { if (x > 0) { l.push(i); } });
+    var l = []; a.pp.forEach(function (x, i) { if (x > 0 && !(a.provocado > 0 && a.golpes[i].c === 'S')) { l.push(i); } });
     return l.length ? l : [0];
   }
   function melhorEsperado(a, d) {
@@ -1148,6 +1248,8 @@
     var melhorDano = Math.max.apply(null, golpesDisponiveis(a).map(function (i) { return esperado(a, d, a.golpes[i]); }).concat([0]));
     golpesDisponiveis(a).forEach(function (i) {
       var g = a.golpes[i], v = g.c === 'S' ? valorEstadoIA(a, d, g, melhorDano) : g.esp in DEVOLVE ? valorDevolve(a, d, g) : esperado(a, d, g);
+      if (g.esp === 'giro' && temRisco(riscoDe(a)) && reservasDe(a).length) { v += melhorDano * 0.3; }
+      if (g.esp === 'arrastar' && reservasDe(d).length) { v += melhorDano * 0.3 * somaSubidas(d); }
       if (g.pr > 0 && !rapido && v >= d.hp) { v += 1000; }
       if (baixaPropria(g) && v < d.hp) { v *= 0.8; }
       v *= 0.9 + Math.random() * 0.2;
@@ -1203,20 +1305,25 @@
         var lado = acoes[k].lado, foe = lado === 'j' ? 'o' : 'j', ac = acoes[k].a;
         if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; ativo(B[lado]).agiu = true; aoEntrar(ativo(B[lado]), ativo(B[foe]), []); continue; }
         var a = ativo(B[lado]), d = ativo(B[foe]);
-        if (a.hp <= 0) { continue; }
+        if (a.hp <= 0 || B.campo.arrastado[lado]) { continue; }
         a.agiu = true;
         if (!antesDeAgir(a, [])) {
           if (a.hp <= 0) { var r0 = iaMelhorReserva(B[lado], d); if (r0 >= 0) { sairDeCampo(a); B[lado].ativo = r0; aoEntrar(ativo(B[lado]), d, []); } break; }
           continue;
         }
         var uso = golpeEfetivo(a, ac.idx, d);
-        if (uso.descansa) { continue; }
-        if (uso.g.c === 'S') { usarEstado(a, d, uso.g, []); continue; }
+        if (uso.descansa || uso.provocado) { continue; }
+        if (uso.g.c === 'S') {
+          var P1 = []; usarEstado(a, d, uso.g, P1); var t1 = extrairTroca(P1);
+          if (t1) { sairDeCampo(d); B[foe].ativo = t1.idx; B.campo.arrastado[foe] = true; aoEntrar(ativo(B[foe]), a, []); }
+          continue;
+        }
         if (bloqueadoPorProtecao(a, d, uso.g, [])) { continue; }
         partirBarreiras(a, d, uso.g, []);
         var r = calcular(a, d, uso.g), antes = d.hp, ns = noSubstituto(a, d, uso.g, r, []);
         if (ns < 0) { d.hp = Math.max(0, d.hp - r.dano); }
-        efeitosDepois(a, d, uso.g, r, ns < 0 ? antes - d.hp : ns, uso.idx);
+        var t2 = extrairTroca(efeitosDepois(a, d, uso.g, r, ns < 0 ? antes - d.hp : ns, uso.idx).passos);
+        if (t2 && d.hp > 0) { sairDeCampo(d); B[foe].ativo = t2.idx; B.campo.arrastado[foe] = true; aoEntrar(ativo(B[foe]), a, []); }
         if (d.hp <= 0) {
           evoluir(a);
           var rs = iaMelhorReserva(B[foe], a);
@@ -1244,18 +1351,18 @@
     return { fv: 3, pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
       nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, turnos: m.turnos,
       nat: m.nat, hab: m.hab, habBase: m.habBase, habPos: m.habPos, novo: m.novo, flash: m.flash, disfarce: m.disfarce, usouEntrada: m.usouEntrada,
-      estado: m.estado, sono: m.sono, toxN: m.toxN, conf: m.conf, recuar: m.recuar, sub: m.sub || 0, protUsos: m.protUsos || 0 };
+      estado: m.estado, sono: m.sono, toxN: m.toxN, conf: m.conf, recuar: m.recuar, sub: m.sub || 0, protUsos: m.protUsos || 0, semente: !!m.semente, provocado: m.provocado || 0 };
   }
   function lutadorDaFoto(f) {
     var p = P[f.pid]; if (!p || f.fv !== 3 || !f.nv || !f.pp || f.nat == null || f.hab == null) { return null; }
     return { p: p, nv: f.nv, nat: f.nat, st: statusDe(p.b, f.nv, f.nat), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
       pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, turnos: f.turnos || 0,
       hab: f.hab, habBase: f.habBase || f.hab, habPos: f.habPos || 0, novo: !!f.novo, flash: !!f.flash, disfarce: !!f.disfarce, usouEntrada: !!f.usouEntrada,
-      estado: f.estado || null, sono: f.sono || 0, toxN: f.toxN || 0, conf: f.conf || 0, recuar: !!f.recuar, sub: f.sub || 0, protUsos: f.protUsos || 0 };
+      estado: f.estado || null, sono: f.sono || 0, toxN: f.toxN || 0, conf: f.conf || 0, recuar: !!f.recuar, sub: f.sub || 0, protUsos: f.protUsos || 0, semente: !!f.semente, provocado: f.provocado || 0 };
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
-    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos, terreno: B.campo.terreno, tturnos: B.campo.tturnos, tela: B.campo.tela } : null };
+    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos, terreno: B.campo.terreno, tturnos: B.campo.tturnos, tela: B.campo.tela, risco: B.campo.risco } : null };
   }
   function batalhaDaFoto(f) {
     var lado = function (l) { return { ativo: l.ativo, transformou: l.transformou, time: l.time.map(lutadorDaFoto) }; };
@@ -1600,6 +1707,15 @@
     if (m.estado) { out.push(`<i class='st st-${m.estado}'>${NOME_EST[m.estado]}</i>`); }
     if (m.conf > 0) { out.push(`<i class='st st-conf'>💫 Confuso</i>`); }
     if (m.sub > 0) { out.push(`<i class='hab'>🧸 Substituto ${m.sub}</i>`); }
+    if (m.semente) { out.push(`<i class='st st-semente'>🌱 Semente</i>`); }
+    if (m.provocado > 0) { out.push(`<i class='st st-conf'>😤 Provocado ${m.provocado}</i>`); }
+    var rk = riscoDe(m);
+    if (rk) {
+      if (rk.rochas) { out.push(`<i class='risco'>🪨 Pedras</i>`); }
+      if (rk.picos) { out.push(`<i class='risco'>📌 Spikes ×${rk.picos}</i>`); }
+      if (rk.toxicos) { out.push(`<i class='risco'>☠️ Picos venenosos ×${rk.toxicos}</i>`); }
+      if (rk.teia) { out.push(`<i class='risco'>🕸️ Teia</i>`); }
+    }
     var tl = telaDe(m);
     if (tl) { if (tl.reflect) { out.push(`<i class='tela'>🧱 Reflect ${tl.reflect}</i>`); } if (tl.luz) { out.push(`<i class='tela'>✨ Light Screen ${tl.luz}</i>`); } if (tl.veu) { out.push(`<i class='tela'>🌌 Aurora Veil ${tl.veu}</i>`); } }
     if (m.item && !m.base) { out.push(`<i class='hab'>${m.item === 'mega' ? '💎 Pedra Mega' : '🔴 Fator Gmax'}</i>`); }
@@ -1639,9 +1755,9 @@
         <div class='gp-tx'><b>Struggle</b><span>Sem PP em nenhum golpe · Poder 50 · recuo de ¼ do HP</span></div><em class='ef ef-nor'>último recurso</em></div>`;
     }
     return golpesVisiveis().map(function (g, i) {
-      var semPP = !(eu.pp[i] > 0), bloqueado = eu.preso && eu.preso.idx !== i;
+      var semPP = !(eu.pp[i] > 0), bloqueado = (eu.preso && eu.preso.idx !== i) || (eu.provocado > 0 && g.c === 'S');
       var e = efTotal(g.t, foe.p);
-      var tag = g.c === 'S' ? (falhaEstado(eu, foe, g) ? ['nul', 'sem efeito'] : ['est', alvoAdversario(g) ? 'no adversário' : 'em si']) :
+      var tag = g.c === 'S' ? (falhaEstado(eu, foe, g) ? ['nul', 'sem efeito'] : ['est', alvoAdversario(g) || RISCO[g.esp] ? 'no adversário' : g.esp === 'haze' || g.esp === 'defog' || g.esp === 'limpar' ? 'no campo' : 'em si']) :
         e === 0 ? ['nul', 'sem efeito'] : e >= 2 ? ['sup', 'super efetivo ×' + e] : e < 1 ? ['pou', 'pouco efetivo ×' + K.fmtEf(e)] : ['nor', 'normal'];
       var desc = g.c === 'S' ? `Estado · ${g.ac ? g.ac + '%' : 'nunca falha'}${prioGolpe(eu, g) > 0 ? ' · ⚡ prioridade' : ''}${efeitoTexto(g)}` : null;
       return `<div class='gp${trava || semPP || bloqueado ? ' off' : ''}${eu.preso && !bloqueado ? ' preso' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
@@ -1657,13 +1773,19 @@
     muralha: ' · protege-se; quem lhe toca fica queimado', obstruir: ' · protege-se; quem lhe toca: DEF -2', aguentar: ' · aguenta qualquer golpe com 1 HP',
     reflect: ' · físicos a metade no teu lado (5 turnos)', 'light-screen': ' · especiais a metade no teu lado (5 turnos)',
     aurora: ' · tudo a metade no teu lado (5 turnos, só com neve)', substituto: ' · gasta 1/4 do HP num substituto',
+    haze: ' · apaga as mudanças de atributos dos dois', taunt: ' · o alvo só pode usar golpes de dano (3 turnos)',
+    roar: ' · obriga o adversário a trocar', semente: ' · rouba 1/8 do HP do alvo por turno',
+    rochas: ' · pedras que ferem quem entra do lado do adversário', picos: ' · picos que ferem quem entra (até 3 camadas)',
+    'picos-toxicos': ' · envenena quem entra (2 camadas: tóxico)', teia: ' · quem entra perde Velocidade',
+    defog: ' · limpa armadilhas, barreiras do adversário e terreno', limpar: ' · limpa armadilhas e substitutos',
+    giro: ' · livra-se das armadilhas do seu lado', arrastar: ' · obriga o alvo a trocar',
     counter: ' · devolve a dobrar o dano físico recebido', mirror: ' · devolve a dobrar o dano especial recebido', metal: ' · devolve ×1,5 o dano recebido', 'cura-sol': ' · recupera 50% (mais com sol)', 'cura-areia': ' · recupera 50% (mais com areia)' };
   function efeitoTexto(g) {
     if (g.c === 'S') {
       return (g.ef ? efeitoEstagios(g).replace(' (100%)', '') : '') + (g.st ? ` · ${VERBO_EST[g.st[0]]}` : '') + (g.cura ? ` · recupera ${g.cura}% do HP` : '') + (TXT_ESP[g.esp] || '');
     }
     if (g.esp in DEVOLVE) { return TXT_ESP[g.esp]; }
-    var extra = (g.st ? ` · ${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}` : '') + (g.fl ? ` · ${g.fl}% recuar` : '') +
+    var extra = (g.esp === 'giro' || g.esp === 'arrastar' ? TXT_ESP[g.esp] : '') + (g.st ? ` · ${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}` : '') + (g.fl ? ` · ${g.fl}% recuar` : '') +
       (g.nome === 'Facade' ? ' · ×2 com estado próprio' : '') + (g.nome === 'Hex' || g.nome === 'Infernal Parade' ? ' · ×2 se o alvo tiver estado' : '') +
       (g.nome === 'Venoshock' || g.nome === 'Barb Barrage' ? ' · ×2 se o alvo estiver envenenado' : '');
     if (!g.ef) { return extra; }
@@ -1869,6 +1991,10 @@
     await mostrarPassos(P0);
     if (!pode) { if (a.hp <= 0) { await desmaiar(lado); return 'eu'; } await esperar(300); return false; }
     var uso = golpeEfetivo(a, idx, d);
+    if (uso.provocado) {
+      mensagem(`<b>${quem}</b> está provocado e não pode usar ${esc(uso.g.nome)}!`); registrar(`<b>${esc(a.p.nome)}</b> não pode usar ${esc(uso.g.nome)} (provocado).`);
+      await esperar(900); return false;
+    }
     if (uso.descansa) {
       mensagem(`<b>${quem}</b> está a preguiçar...`); registrar(`<b>${esc(a.p.nome)}</b> está a preguiçar (Truant).`);
       await esperar(900); return false;
@@ -1880,7 +2006,8 @@
     await esperar(350);
     if (g.c === 'S') {
       if (alvoAdversario(g)) { await animarAtaque(lado, foe, g); } else { var eu0 = $('mon-' + lado); if (eu0) { eu0.classList.remove('entra'); void eu0.offsetWidth; eu0.classList.add('entra'); } await esperar(400); }
-      var PE = []; usarEstado(a, d, g, PE); await mostrarPassos(PE); atualizarHud(); await esperar(300);
+      var PE = []; usarEstado(a, d, g, PE); var trE = extrairTroca(PE); await mostrarPassos(PE); atualizarHud(); await esperar(300);
+      if (trE) { await arrastar(foe, trE.idx); }
       return false;
     }
     var PB = [];
@@ -1914,7 +2041,7 @@
     else if (r.ef < 1) { bannerFx('pouco efetivo...', 'pou'); registrar(`<i class='pou'>Não foi muito efetivo...</i>`); }
     await animarHp(foe, d);
     if (r.acertos > 1) { registrar(`Acertou ${r.acertos} vezes!`); }
-    var ev = efeitosDepois(a, d, g, r, hpAntes - d.hp, uso.idx);
+    var ev = efeitosDepois(a, d, g, r, hpAntes - d.hp, uso.idx), trD = extrairTroca(ev.passos);
     await mostrarPassos(ev.passos);
     if (ev.cansou) { registrar(`<b>${esc(a.p.nome)}</b> acalmou-se.`); }
     if (d.hp <= 0) {
@@ -1923,7 +2050,15 @@
       if (antes) { await animarEvolucao(lado, antes, a); }
       return 'alvo';
     }
+    if (trD) { await arrastar(foe, trD.idx); }
     return false;
+  }
+  /* Roar, Whirlwind, Dragon Tail: o alvo é trocado e o novo não age neste turno */
+  async function arrastar(lado, idx) {
+    var sai = $('mon-' + lado); if (sai) { sai.classList.add('sai'); }
+    await esperar(400);
+    S.B.campo.arrastado[lado] = true;
+    await entrar(lado, idx);
   }
   async function desmaiar(lado) {
     var m = ativo(S.B[lado]), mon = $('mon-' + lado);
@@ -2052,7 +2187,7 @@
         await esperar(450);
         await entrar(lado, ac.idx); ativo(B[lado]).agiu = true; continue;
       }
-      if (ativo(B[lado]).hp <= 0) { continue; }
+      if (ativo(B[lado]).hp <= 0 || B.campo.arrastado[lado]) { continue; }
       var ko = await usarGolpe(lado, ac.idx);
       if (ko) { if (await aposDesmaio(ko === 'eu' ? lado : lado === 'j' ? 'o' : 'j')) { return; } break; }
     }
@@ -2136,7 +2271,7 @@
         await esperar(450);
         await entrar(lado, ac.idx); ativo(B[lado]).agiu = true; continue;
       }
-      if (ativo(B[lado]).hp <= 0) { continue; }
+      if (ativo(B[lado]).hp <= 0 || B.campo.arrastado[lado]) { continue; }
       var ko = await usarGolpe(lado, ac.idx);
       if (ko) { if (await aposDesmaioOnline(ko === 'eu' ? lado : lado === 'j' ? 'o' : 'j', n)) { fecharTurno(n); return; } break; }
     }
@@ -2160,7 +2295,7 @@
   /* fim do turno: avança o contador e compara o estado com o do outro lado */
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
-      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat + '/' + (m.estado || '-'); }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l])) + ':' + ativo(B[l]).conf + ':' + (ativo(B[l]).sub || 0) + ':' + JSON.stringify(B.campo.tela[l]);
+      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat + '/' + (m.estado || '-'); }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l])) + ':' + ativo(B[l]).conf + ':' + (ativo(B[l]).sub || 0) + ':' + JSON.stringify(B.campo.tela[l]) + ':' + JSON.stringify(B.campo.risco[l]) + ':' + (ativo(B[l]).semente ? 1 : 0) + (ativo(B[l]).provocado || 0);
     }).join('|') + '|' + (B.campo.clima || '-') + B.campo.turnos + '|' + (B.campo.terreno || '-') + B.campo.tturnos;
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
@@ -2467,7 +2602,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, fimTurnoBarreiras: fimTurnoBarreiras, limparTurno: limparTurno, bloqueadoPorProtecao: bloqueadoPorProtecao, noSubstituto: noSubstituto, valorDevolve: valorDevolve, usarEstado: usarEstado, valorEstadoIA: valorEstadoIA, golpesAuto: golpesAuto, converterMv: converterMv, GR_NOME: GR_NOME, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, fimTurnoBarreiras: fimTurnoBarreiras, limparTurno: limparTurno, aplicarRiscos: aplicarRiscos, riscoDe: riscoDe, reservasDe: reservasDe, extrairTroca: extrairTroca, bloqueadoPorProtecao: bloqueadoPorProtecao, noSubstituto: noSubstituto, valorDevolve: valorDevolve, usarEstado: usarEstado, valorEstadoIA: valorEstadoIA, golpesAuto: golpesAuto, converterMv: converterMv, GR_NOME: GR_NOME, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
