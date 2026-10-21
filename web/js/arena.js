@@ -40,7 +40,7 @@
     });
     return out;
   }
-  var VERSAO = D.v + '.' + GR.length + '.r7';
+  var VERSAO = D.v + '.' + GR.length + '.r8';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -69,6 +69,10 @@
     if (g.esp === 'rest') { v += 0.35; }
     var beneficio = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice', 't-eletrico': 'electric', 't-planta': 'grass', 't-psiquico': 'psychic' }[g.esp];
     if (beneficio && p.t.indexOf(beneficio) >= 0) { v += 0.3; }
+    var hl = habsDe(p), hAuto = hl.length ? hl[habAuto(p)].slug : '', defensivo = (p.b.def + p.b.spd + p.b.hp) > (p.b.atk + p.b.spa) * 1.6;
+    if (PROTECAO[g.esp]) { v += hAuto === 'speed-boost' ? 0.6 : 0.2; }
+    if (g.esp === 'reflect' || g.esp === 'light-screen') { v += defensivo ? 0.5 : 0.25; }
+    if (g.esp === 'substituto') { v += defensivo ? 0.4 : 0.3; }
     return v * (g.ac ? g.ac / 100 : 1);
   }
   function golpesAuto(p) {
@@ -393,7 +397,9 @@
   var BOLA = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice' };
   var TEMPESTADE = /^(Thunder|Hurricane|Bleakwind Storm|Wildbolt Storm|Sandsear Storm)$/;
   function ligarCampo(B, c) {
-    B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, terreno: (c && c.terreno) || null, tturnos: (c && c.tturnos) || 0, B: B };
+    var tl = function (x) { return { reflect: (x && x.reflect) || 0, luz: (x && x.luz) || 0, veu: (x && x.veu) || 0 }; };
+    B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, terreno: (c && c.terreno) || null, tturnos: (c && c.tturnos) || 0,
+      tela: { j: tl(c && c.tela && c.tela.j), o: tl(c && c.tela && c.tela.o) }, B: B };
     ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.campo = B.campo; }); });
     return B;
   }
@@ -587,7 +593,7 @@
     if (m.hp > 0 && hab(m) === 'regenerator') { mexerHp(m, Math.floor(m.hpMax / 3), `<b>${esc(m.p.nome)}</b> regenerou {x} HP.`, P || []); }
     if (m.hp > 0 && m.estado && hab(m) === 'natural-cure') { m.estado = null; m.sono = 0; }
     m.est = zeroEst(); m.preso = null; m.descansa = false; m.turnos = 0; m.flash = false; m.novo = true; m.hab = m.habBase || m.hab;
-    m.conf = 0; m.recuar = false; m.toxN = 0;
+    m.conf = 0; m.recuar = false; m.toxN = 0; m.sub = 0; m.protUsos = 0; m.protegido = null; m.aguentar = false; m.recebido = null;
   }
 
   /* ---------- Mega Evolução e Gigantamax: só quem leva o item, uma vez por time ---------- */
@@ -716,6 +722,8 @@
     if (hd === 'punk-rock' && SOM.test(g.nome)) { m *= 0.5; }
     if ((hd === 'multiscale' || hd === 'shadow-shield') && d.hp === d.hpMax) { m *= 0.5; }
     if ((hd === 'filter' || hd === 'solid-rock' || hd === 'prism-armor') && e >= 2) { m *= 0.75; }
+    var tl = telaDe(d);
+    if (tl && !crit && h !== 'infiltrator' && ((g.c === 'F' && (tl.reflect || tl.veu)) || (g.c === 'E' && (tl.luz || tl.veu)))) { m *= 0.5; }
     return m;
   }
   function danoBase(a, d, g, crit) {
@@ -737,6 +745,14 @@
   var CHANCE_CRIT = [1 / 24, 1 / 8, 1 / 2];
   function calcular(a, d, g) {
     var t = tipoDe(a, g), e = efetividade(a, d, g, t), bloq = e === 0 ? '' : bloqueio(a, d, g, t, e);
+    if (g.esp in DEVOLVE) {
+      var fixo = danoDevolvido(a, g);
+      if (!fixo) { return { erro: true, falhou: true, dano: 0, ef: e, crit: false, acertos: 0, t: t }; }
+      if (e === 0 || bloq) { return { erro: false, dano: 0, ef: 0, crit: false, acertos: 0, t: t, bloq: bloq || '' }; }
+      var rf = { erro: false, dano: fixo, ef: 1, crit: false, acertos: 1, t: t, fixo: true };
+      if (d.aguentar && rf.dano >= d.hp) { rf.dano = d.hp - 1; rf.endure = true; }
+      return rf;
+    }
     if (bloq) { return { erro: false, dano: 0, ef: 0, crit: false, acertos: 0, t: t, bloq: bloq }; }
     var ac = precisaoDe(a, d, g);
     if (!(ac === 0 || rng() * 100 < ac)) { return { erro: true, dano: 0, ef: e, crit: false, acertos: 0, t: t }; }
@@ -756,10 +772,11 @@
     if (dano > 0 && !d.disfarce && (hd === 'disguise' || (hd === 'ice-face' && g.c === 'F'))) {
       res.dano = hd === 'disguise' ? Math.min(d.hp, Math.max(1, Math.floor(d.hpMax / 8))) : 0; res.disfarce = hd;
     } else if (hd === 'sturdy' && d.hp === d.hpMax && dano >= d.hp) { res.dano = d.hp - 1; res.aguentou = true; }
+    if (d.aguentar && res.dano >= d.hp) { res.dano = d.hp - 1; res.endure = true; }
     return res;
   }
   function esperado(a, d, g) {
-    if (g.c === 'S') { return 0; }
+    if (g.c === 'S' || g.esp in DEVOLVE) { return 0; }
     var t = tipoDe(a, g), e = efetividade(a, d, g, t);
     if (!e || bloqueio(a, d, g, t, e)) { return 0; }
     var h = hab(a), nc = Math.min(2, (g.ca || 0) + (h === 'super-luck' ? 1 : 0)), hd = habAlvo(a, d);
@@ -788,8 +805,71 @@
     if (!a.pp.some(function (x) { return x > 0; })) { return { g: LUTA, idx: -1 }; }
     if (!(a.pp[idx] > 0)) { idx = a.pp.findIndex(function (x) { return x > 0; }); }
     a.pp[idx] = Math.max(0, a.pp[idx] - (d && hab(d) === 'pressure' ? 2 : 1));
-    return { g: a.golpes[idx], idx: idx };
+    var ge = a.golpes[idx];
+    if (!PROTECAO[ge.esp] && ge.esp !== 'aguentar') { a.protUsos = 0; }
+    return { g: ge, idx: idx };
   }
+  /* ---------- golpes defensivos: Protect e variantes, Endure, barreiras, Substitute; Counter e afins ---------- */
+  var PROTECAO = { proteger: 1, 'escudo-rei': 1, espinhos: 1, bunker: 1, seda: 1, muralha: 1, obstruir: 1 };
+  var DEVOLVE = { counter: 'F', mirror: 'E', metal: '' };
+  var QUEBRA_TELA = /^(Brick Break|Psychic Fangs|Raging Bull)$/;
+  function ladoM(m) { var B = m && m.campo && m.campo.B; return B && B.j.time.indexOf(m) >= 0 ? 'j' : 'o'; }
+  function telaDe(m) { var c = m && m.campo; return c && c.tela ? c.tela[ladoM(m)] : null; }
+  /* no início de cada turno: proteções, Endure, dano recebido e "já agiu" voltam ao normal */
+  function limparTurno(B) {
+    ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.protegido = null; m.aguentar = false; m.recebido = null; m.agiu = false; }); });
+  }
+  /* o alvo está protegido? (Unseen Fist atravessa com golpes físicos; algumas proteções deixam passar golpes de estado) */
+  function bloqueadoPorProtecao(a, d, g, P) {
+    if (!d.protegido || d.hp <= 0) { return false; }
+    var estado = g.c === 'S', t = d.protegido;
+    if (estado && !alvoAdversario(g)) { return false; }
+    if (estado && (t === 'escudo-rei' || t === 'seda' || t === 'obstruir')) { return false; }
+    if (!estado && hab(a) === 'unseen-fist' && g.c === 'F') { return false; }
+    P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> protegeu-se!` });
+    a.preso = null;
+    if (!estado && g.c === 'F' && a.hp > 0) {
+      if (t === 'espinhos') { mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 8)), `<b>${esc(a.p.nome)}</b> picou-se e perdeu {x} HP.`, P); }
+      if (t === 'bunker') { aplicarEstado(a, 'psn', d, P); }
+      if (t === 'muralha') { aplicarEstado(a, 'brn', d, P); }
+      if (t === 'escudo-rei') { alterar(a, 'atk', -1, d, P); }
+      if (t === 'obstruir') { alterar(a, 'def', -2, d, P); }
+      if (t === 'seda') { alterar(a, 'spe', -1, d, P); }
+    }
+    return true;
+  }
+  /* Brick Break, Psychic Fangs e Raging Bull partem as barreiras do alvo */
+  function partirBarreiras(a, d, g, P) {
+    var tl = telaDe(d);
+    if (!QUEBRA_TELA.test(g.nome) || !tl || !(tl.reflect || tl.luz || tl.veu)) { return; }
+    tl.reflect = tl.luz = tl.veu = 0; P.push({ tipo: 'txt', txt: `As barreiras de <b>${esc(d.p.nome)}</b> partiram-se!` });
+  }
+  /* o substituto recebe o golpe (os sonoros e Infiltrator atravessam); devolve o dano que levou */
+  function noSubstituto(a, d, g, r, P) {
+    if (!(d.sub > 0) || hab(a) === 'infiltrator' || SOM.test(g.nome) || r.erro || r.ef === 0) { return -1; }
+    var x = Math.min(r.dano, d.sub); d.sub -= x; r.sub = true;
+    P.push({ tipo: 'txt', txt: `O substituto de <b>${esc(d.p.nome)}</b> recebeu o golpe (${x}).` });
+    if (d.sub <= 0) { d.sub = 0; P.push({ tipo: 'txt', txt: `O substituto de <b>${esc(d.p.nome)}</b> partiu-se!` }); }
+    return x;
+  }
+  /* Counter (físico ×2), Mirror Coat (especial ×2), Metal Burst/Comeuppance (qualquer ×1,5): dano recebido neste turno */
+  function danoDevolvido(a, g) {
+    var rec = a.recebido; if (!rec || !rec.dano) { return 0; }
+    var cat = DEVOLVE[g.esp];
+    if (cat && rec.c !== cat) { return 0; }
+    return Math.floor(rec.dano * (cat ? 2 : 1.5));
+  }
+  /* fim do turno: as barreiras perdem um turno */
+  function fimTurnoBarreiras(B, lados) {
+    var P = [], c = B.campo; if (!c || !c.tela) { return P; }
+    var nomes = { reflect: 'O Reflect', luz: 'O Light Screen', veu: 'O Aurora Veil' };
+    lados.forEach(function (l) {
+      var tl = c.tela[l];
+      Object.keys(nomes).forEach(function (k) { if (tl[k] > 0) { tl[k]--; if (tl[k] === 0) { P.push({ tipo: 'txt', txt: `${nomes[k]} ${l === 'j' ? 'do teu lado' : 'do oponente'} acabou.` }); } } });
+    });
+    return P;
+  }
+
   /* ---------- golpes de estado e de reforço ---------- */
   var POS = /^(Spore|Sleep Powder|Stun Spore|Poison Powder|Cotton Spore)$/;
   function alvoAdversario(g) { return !!((g.ef && g.ef[0] === 'a') || g.st); }
@@ -806,6 +886,8 @@
   }
   function podeDormirRest(m) { var e = m.estado; m.estado = null; var ok = podeTerEstado(m, 'slp', null); m.estado = e; return ok; }
   function usarEstado(a, d, g, P) {
+    if (alvoAdversario(g) && bloqueadoPorProtecao(a, d, g, P)) { return; }
+    if (alvoAdversario(g) && d.sub > 0 && hab(a) !== 'infiltrator' && !SOM.test(g.nome)) { P.push({ tipo: 'txt', txt: 'Mas falhou! (o substituto protegeu-o)' }); return; }
     if (alvoAdversario(g)) {
       if (habAlvo(a, d) === 'magic-bounce' && d.hp > 0) { anunciar(d, P); P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> devolveu o golpe!` }); var t = a; a = d; d = t; }
       var f = falhaEstado(a, d, g);
@@ -817,6 +899,28 @@
       return;
     }
     var nome = `<b>${esc(a.p.nome)}</b>`, falhou = false;
+    if (PROTECAO[g.esp] || g.esp === 'aguentar') {
+      // falha se o adversário já agiu neste turno; usado seguido, só 1/3 de chance (1/9, ...)
+      var n = a.protUsos || 0, ok = !d.agiu && (n === 0 || rng() < Math.pow(1 / 3, n));
+      if (!ok) { a.protUsos = 0; P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+      a.protUsos = n + 1;
+      if (g.esp === 'aguentar') { a.aguentar = true; P.push({ tipo: 'txt', txt: nome + ' prepara-se para aguentar!' }); }
+      else { a.protegido = g.esp; P.push({ tipo: 'txt', txt: nome + ' protegeu-se!' }); }
+      return;
+    }
+    if (g.esp === 'reflect' || g.esp === 'light-screen' || g.esp === 'aurora') {
+      var tl = telaDe(a), k = g.esp === 'reflect' ? 'reflect' : g.esp === 'light-screen' ? 'luz' : 'veu';
+      if (!tl || tl[k] > 0 || (k === 'veu' && clima(a) !== 'neve')) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+      tl[k] = 5;
+      P.push({ tipo: 'txt', txt: { reflect: 'Reflect: os golpes físicos fazem metade do dano', luz: 'Light Screen: os golpes especiais fazem metade do dano', veu: 'Aurora Veil: todos os golpes fazem metade do dano' }[k] + ` ao lado de ${nome} (5 turnos).` });
+      return;
+    }
+    if (g.esp === 'substituto') {
+      var custo = Math.floor(a.hpMax / 4);
+      if (a.sub > 0 || a.hp <= custo) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+      a.hp -= custo; a.sub = custo; P.push({ tipo: 'hp', m: a, d: -custo, txt: nome + ' criou um substituto!' });
+      return;
+    }
     if (g.ef) { g.ef[2].forEach(function (x) { alterar(a, x[0], x[1], null, P); }); }
     var cura = g.cura;
     if (g.esp === 'cura-sol') { cura = clima(a) === 'sol' ? 66.7 : clima(a) ? 25 : 50; }
@@ -829,6 +933,16 @@
     if (g.esp === 'sol' || g.esp === 'chuva' || g.esp === 'areia' || g.esp === 'neve') { falhou = !mudarClima(a, g.esp, P); }
     if (g.esp && g.esp.indexOf('t-') === 0) { falhou = !mudarTerreno(a, g.esp.slice(2), P); }
     if (falhou) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); }
+  }
+  function melhorEsperadoCat(d, a, cat) {
+    var v = 0; d.golpes.forEach(function (g, i) { if (g.c === cat && d.pp[i] > 0) { v = Math.max(v, esperado(d, a, g)); } }); return v;
+  }
+  /* IA: Counter/Mirror Coat/Metal Burst valem se aguentar o golpe do adversário */
+  function valorDevolve(a, d, g) {
+    var cat = DEVOLVE[g.esp], inc = cat ? melhorEsperadoCat(d, a, cat) : melhorEsperado(d, a);
+    if (inc <= 0 || inc >= a.hp || efetividade(a, d, g, tipoDe(a, g)) === 0) { return 0; }
+    if (!cat && velocidade(a) > velocidade(d)) { return 0; }
+    return Math.min(d.hp, inc * (cat ? 2 : 1.5)) * 0.6;
   }
   /* IA: quanto vale usar um golpe de estado agora (na mesma escala do dano esperado) */
   function valorEstadoIA(a, d, g, melhor) {
@@ -849,6 +963,26 @@
     if (g.st && podeTerEstado(d, g.st[0], a)) {
       var f = { brn: d.st.atk > d.st.spa ? 1.0 : 0.5, par: velocidade(d) > velocidade(a) ? 0.9 : 0.5, psn: 0.6, tox: 0.8, slp: 1.3, frz: 0.6, conf: 0.5 }[g.st[0]] || 0;
       v += melhor * f;
+    }
+    if (PROTECAO[g.esp]) {
+      if (a.protUsos > 0) { return 0; }
+      var tick = (d.estado === 'brn' ? d.hpMax / 16 : 0) + (d.estado === 'psn' ? d.hpMax / 8 : 0) + (d.estado === 'tox' ? d.hpMax * ((d.toxN || 0) + 1) / 16 : 0) +
+        (clima(a) === 'areia' && !imuneAreia(d) ? d.hpMax / 16 : 0);
+      v += tick + (hab(a) === 'speed-boost' && a.est.spe < 6 ? melhor * 0.5 : 0) + (d.gmax > 0 ? melhor * 0.8 : 0) + (d.preso ? melhor * 0.4 : 0) +
+        (g.esp !== 'proteger' && d.st.atk > d.st.spa ? melhor * 0.15 : 0);
+      return v;
+    }
+    if (g.esp === 'aguentar') { return a.protUsos === 0 && ameaca >= a.hp && a.hp > 1 && a.golpes.some(function (x) { return x.esp in DEVOLVE || x.pr > 0; }) ? melhor * 0.5 : 0; }
+    if (g.esp === 'reflect' || g.esp === 'light-screen' || g.esp === 'aurora') {
+      var tl = telaDe(a), fis = melhorEsperadoCat(d, a, 'F'), esp = melhorEsperadoCat(d, a, 'E');
+      if (!tl || !aguenta) { return 0; }
+      if (g.esp === 'reflect') { return tl.reflect || tl.veu ? 0 : fis * 1.2; }
+      if (g.esp === 'light-screen') { return tl.luz || tl.veu ? 0 : esp * 1.2; }
+      return clima(a) !== 'neve' || tl.veu ? 0 : Math.max(fis, esp) * 1.3;
+    }
+    if (g.esp === 'substituto') {
+      if (a.sub > 0 || a.hp <= a.hpMax / 2) { return 0; }
+      return (ameaca < a.hpMax / 4 ? melhor * 0.6 : 0) + (d.golpes.some(function (x) { return x.c === 'S' && alvoAdversario(x); }) ? melhor * 0.4 : 0);
     }
     var falta = 1 - a.hp / a.hpMax, cura = g.esp === 'cura-sol' || g.esp === 'cura-areia' ? 50 : g.cura;
     if (cura && falta > 0.45) { v += melhor * falta * 2.2 * cura / 50; }
@@ -928,19 +1062,20 @@
     else if (!r.erro && r.ef !== 0) {
       if (r.disfarce) { d.disfarce = true; anunciar(d, P); P.push({ tipo: 'txt', txt: `O disfarce de <b>${esc(d.p.nome)}</b> protegeu-o!` }); }
       if (r.aguentou) { anunciar(d, P); P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> aguentou o golpe!` }); }
+      if (r.endure) { P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> aguentou o golpe!` }); }
       if (g.luta) {
         if (hab(a) !== 'magic-guard') { mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 4)), `<b>${esc(a.p.nome)}</b> sofreu {x} de recuo.`, P); }
       } else { efeitoDreno(a, d, g, causado, P); }
       if (g.ef && !(secundario(g) && hab(a) === 'sheer-force')) {
         var alvo = g.ef[0] === 'u' ? a : d;
-        var protegido = alvo === d && secundario(g) && habAlvo(a, d) === 'shield-dust';
+        var protegido = alvo === d && (r.sub || (secundario(g) && habAlvo(a, d) === 'shield-dust'));
         var chance = g.ef[1] * (hab(a) === 'serene-grace' ? 2 : 1);
         if (alvo.hp > 0 && !protegido && (g.ef[1] >= 100 || rng() * 100 < chance)) {
           g.ef[2].forEach(function (x) { alterar(alvo, x[0], x[1], alvo === d ? a : null, P); });
         }
       }
       // estados e recuo como efeito secundário
-      if (causado > 0 && d.hp > 0 && !(hab(a) === 'sheer-force' && secundario(g)) && habAlvo(a, d) !== 'shield-dust') {
+      if (!r.sub && causado > 0 && d.hp > 0 && !(hab(a) === 'sheer-force' && secundario(g)) && habAlvo(a, d) !== 'shield-dust') {
         var mult = hab(a) === 'serene-grace' ? 2 : 1;
         if (g.st && (g.st[1] >= 100 || rng() * 100 < g.st[1] * mult)) {
           var est = g.st[0] === 'tri' ? ['brn', 'par', 'frz'][Math.floor(rng() * 3)] : g.st[0] === 'dire' ? ['psn', 'par', 'slp'][Math.floor(rng() * 3)] : g.st[0];
@@ -949,7 +1084,7 @@
         var fl = g.fl || (hab(a) === 'stench' ? 10 : 0);
         if (fl && rng() * 100 < fl * mult && habAlvo(a, d) !== 'inner-focus') { d.recuar = true; }
       }
-      if (causado > 0) { reacoes(a, d, g, r, causado, P); }
+      if (causado > 0 && !r.sub) { d.recebido = { c: g.c, dano: causado }; reacoes(a, d, g, r, causado, P); }
       if (d.hp <= 0) { aoDerrubar(a, P); }
     }
     if (g.esp === 'furia') {
@@ -1012,7 +1147,7 @@
     var rapido = velocidade(a) >= velocidade(d), melhor = golpesDisponiveis(a)[0], nota = -1;
     var melhorDano = Math.max.apply(null, golpesDisponiveis(a).map(function (i) { return esperado(a, d, a.golpes[i]); }).concat([0]));
     golpesDisponiveis(a).forEach(function (i) {
-      var g = a.golpes[i], v = g.c === 'S' ? valorEstadoIA(a, d, g, melhorDano) : esperado(a, d, g);
+      var g = a.golpes[i], v = g.c === 'S' ? valorEstadoIA(a, d, g, melhorDano) : g.esp in DEVOLVE ? valorDevolve(a, d, g) : esperado(a, d, g);
       if (g.pr > 0 && !rapido && v >= d.hp) { v += 1000; }
       if (baixaPropria(g) && v < d.hp) { v *= 0.8; }
       v *= 0.9 + Math.random() * 0.2;
@@ -1062,12 +1197,14 @@
     aoEntrar(ativo(B.j), ativo(B.o), []); aoEntrar(ativo(B.o), ativo(B.j), []);
     while (vivos(B.j).length && vivos(B.o).length && turnos < 300) {
       turnos++;
+      limparTurno(B);
       var acoes = ordem(B, iaAcao(B.j, B.o), iaAcao(B.o, B.j));
       for (var k = 0; k < acoes.length; k++) {
         var lado = acoes[k].lado, foe = lado === 'j' ? 'o' : 'j', ac = acoes[k].a;
-        if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; aoEntrar(ativo(B[lado]), ativo(B[foe]), []); continue; }
+        if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; ativo(B[lado]).agiu = true; aoEntrar(ativo(B[lado]), ativo(B[foe]), []); continue; }
         var a = ativo(B[lado]), d = ativo(B[foe]);
         if (a.hp <= 0) { continue; }
+        a.agiu = true;
         if (!antesDeAgir(a, [])) {
           if (a.hp <= 0) { var r0 = iaMelhorReserva(B[lado], d); if (r0 >= 0) { sairDeCampo(a); B[lado].ativo = r0; aoEntrar(ativo(B[lado]), d, []); } break; }
           continue;
@@ -1075,9 +1212,11 @@
         var uso = golpeEfetivo(a, ac.idx, d);
         if (uso.descansa) { continue; }
         if (uso.g.c === 'S') { usarEstado(a, d, uso.g, []); continue; }
-        var r = calcular(a, d, uso.g), antes = d.hp;
-        d.hp = Math.max(0, d.hp - r.dano);
-        efeitosDepois(a, d, uso.g, r, antes - d.hp, uso.idx);
+        if (bloqueadoPorProtecao(a, d, uso.g, [])) { continue; }
+        partirBarreiras(a, d, uso.g, []);
+        var r = calcular(a, d, uso.g), antes = d.hp, ns = noSubstituto(a, d, uso.g, r, []);
+        if (ns < 0) { d.hp = Math.max(0, d.hp - r.dano); }
+        efeitosDepois(a, d, uso.g, r, ns < 0 ? antes - d.hp : ns, uso.idx);
         if (d.hp <= 0) {
           evoluir(a);
           var rs = iaMelhorReserva(B[foe], a);
@@ -1085,7 +1224,7 @@
           break;
         }
       }
-      fimTurnoClima(B, ['j', 'o']); fimTurnoTerreno(B, ['j', 'o']); fimTurnoEstado(B, ['j', 'o']); fimTurnoLado(B.j); fimTurnoLado(B.o);
+      fimTurnoClima(B, ['j', 'o']); fimTurnoTerreno(B, ['j', 'o']); fimTurnoBarreiras(B, ['j', 'o']); fimTurnoEstado(B, ['j', 'o']); fimTurnoLado(B.j); fimTurnoLado(B.o);
       ['j', 'o'].forEach(function (l) {
         var m = ativo(B[l]);
         if (m.hp <= 0 && vivos(B[l]).length) { var rr = iaMelhorReserva(B[l], ativo(B[l === 'j' ? 'o' : 'j'])); if (rr >= 0) { sairDeCampo(m); B[l].ativo = rr; aoEntrar(ativo(B[l]), ativo(B[l === 'j' ? 'o' : 'j']), []); } }
@@ -1105,18 +1244,18 @@
     return { fv: 3, pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
       nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, turnos: m.turnos,
       nat: m.nat, hab: m.hab, habBase: m.habBase, habPos: m.habPos, novo: m.novo, flash: m.flash, disfarce: m.disfarce, usouEntrada: m.usouEntrada,
-      estado: m.estado, sono: m.sono, toxN: m.toxN, conf: m.conf, recuar: m.recuar };
+      estado: m.estado, sono: m.sono, toxN: m.toxN, conf: m.conf, recuar: m.recuar, sub: m.sub || 0, protUsos: m.protUsos || 0 };
   }
   function lutadorDaFoto(f) {
     var p = P[f.pid]; if (!p || f.fv !== 3 || !f.nv || !f.pp || f.nat == null || f.hab == null) { return null; }
     return { p: p, nv: f.nv, nat: f.nat, st: statusDe(p.b, f.nv, f.nat), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
       pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, turnos: f.turnos || 0,
       hab: f.hab, habBase: f.habBase || f.hab, habPos: f.habPos || 0, novo: !!f.novo, flash: !!f.flash, disfarce: !!f.disfarce, usouEntrada: !!f.usouEntrada,
-      estado: f.estado || null, sono: f.sono || 0, toxN: f.toxN || 0, conf: f.conf || 0, recuar: !!f.recuar };
+      estado: f.estado || null, sono: f.sono || 0, toxN: f.toxN || 0, conf: f.conf || 0, recuar: !!f.recuar, sub: f.sub || 0, protUsos: f.protUsos || 0 };
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
-    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos, terreno: B.campo.terreno, tturnos: B.campo.tturnos } : null };
+    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos, terreno: B.campo.terreno, tturnos: B.campo.tturnos, tela: B.campo.tela } : null };
   }
   function batalhaDaFoto(f) {
     var lado = function (l) { return { ativo: l.ativo, transformou: l.transformou, time: l.time.map(lutadorDaFoto) }; };
@@ -1334,6 +1473,7 @@
     if (g.ca === 2) { x.push('<i>sempre crítico</i>'); }
     if (g.st) { x.push(`<i class='ge-st'>${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}</i>`); }
     if (g.fl) { x.push(`<i>${g.fl}% recuar</i>`); }
+    if (g.esp in DEVOLVE) { x.push(`<i>${TXT_ESP[g.esp].slice(3)}</i>`); }
     if (g.c === 'S') {
       if (g.ef) { x.push(`<i>${(g.ef[0] === 'u' ? 'em si: ' : 'no alvo: ') + g.ef[2].map(function (y) { return CURTO_ATR[y[0]] + ' ' + (y[1] > 0 ? '+' : '') + y[1]; }).join(' ')}</i>`); }
       if (g.cura) { x.push(`<i>recupera ${g.cura}%</i>`); }
@@ -1354,7 +1494,7 @@
       var on = S.ge.ids.indexOf(g.id) >= 0;
       return `<div class='ge-g${on ? ' on' : ''}${cheio && !on ? ' cheio' : ''}' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>
         ${icone(g.t, 22)}<b>${esc(g.nome)}</b><span class='ge-cat'>${g.c === 'F' ? 'Físico' : g.c === 'E' ? 'Especial' : 'Estado'}</span>
-        <span class='ge-num'>${g.c === 'S' ? '—' : g.pw}</span><span class='ge-num'>${g.ac ? g.ac + '%' : '—'}</span><em>${extrasHtml(p, g)}</em></div>`;
+        <span class='ge-num'>${g.c === 'S' || g.esp in DEVOLVE ? '—' : g.pw}</span><span class='ge-num'>${g.ac ? g.ac + '%' : '—'}</span><em>${extrasHtml(p, g)}</em></div>`;
     }).join('');
   }
   function editorHtml() {
@@ -1459,6 +1599,9 @@
     if (m.preso) { out.push(`<i class='hab'>🔒 ${esc(m.golpes[m.preso.idx].nome)}</i>`); }
     if (m.estado) { out.push(`<i class='st st-${m.estado}'>${NOME_EST[m.estado]}</i>`); }
     if (m.conf > 0) { out.push(`<i class='st st-conf'>💫 Confuso</i>`); }
+    if (m.sub > 0) { out.push(`<i class='hab'>🧸 Substituto ${m.sub}</i>`); }
+    var tl = telaDe(m);
+    if (tl) { if (tl.reflect) { out.push(`<i class='tela'>🧱 Reflect ${tl.reflect}</i>`); } if (tl.luz) { out.push(`<i class='tela'>✨ Light Screen ${tl.luz}</i>`); } if (tl.veu) { out.push(`<i class='tela'>🌌 Aurora Veil ${tl.veu}</i>`); } }
     if (m.item && !m.base) { out.push(`<i class='hab'>${m.item === 'mega' ? '💎 Pedra Mega' : '🔴 Fator Gmax'}</i>`); }
     return out.join('');
   }
@@ -1503,17 +1646,23 @@
       var desc = g.c === 'S' ? `Estado · ${g.ac ? g.ac + '%' : 'nunca falha'}${prioGolpe(eu, g) > 0 ? ' · ⚡ prioridade' : ''}${efeitoTexto(g)}` : null;
       return `<div class='gp${trava || semPP || bloqueado ? ' off' : ''}${eu.preso && !bloqueado ? ' preso' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
         <div class='gp-ico'>${icone(g.t, 30)}</div><small class='gp-pp${eu.pp[i] <= 2 ? ' pouco' : ''}'>PP ${eu.pp[i]}/${g.pp || 10}</small>
-        <div class='gp-tx'><b>${eu.preso && !bloqueado ? '🔒 ' : ''}${esc(g.nome)}</b><span>${desc != null ? desc : `${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.esp === 'hp' ? poderDe(eu, g) + ' (cai com o HP)' : g.pw}`}${desc != null ? '' : `${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}${efeitoTexto(g)}${g.esp === 'furia' ? ' · prende 2-3 turnos' : ''}`}</span></div>
+        <div class='gp-tx'><b>${eu.preso && !bloqueado ? '🔒 ' : ''}${esc(g.nome)}</b><span>${desc != null ? desc : `${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.esp === 'hp' ? poderDe(eu, g) + ' (cai com o HP)' : g.esp in DEVOLVE ? '—' : g.pw}`}${desc != null ? '' : `${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}${efeitoTexto(g)}${g.esp === 'furia' ? ' · prende 2-3 turnos' : ''}`}</span></div>
         <em class='ef ef-${tag[0]}'>${tag[1]}</em></div>`;
     }).join('');
   }
   var TXT_ESP = { sol: ' · sol por 5 turnos', chuva: ' · chuva por 5 turnos', areia: ' · tempestade de areia por 5 turnos', neve: ' · neve por 5 turnos',
     't-eletrico': ' · terreno Elétrico', 't-planta': ' · terreno de Planta', 't-psiquico': ' · terreno Psíquico', 't-nevoa': ' · terreno de Névoa',
-    rest: ' · dorme 2 turnos e recupera tudo', 'cura-sol': ' · recupera 50% (mais com sol)', 'cura-areia': ' · recupera 50% (mais com areia)' };
+    rest: ' · dorme 2 turnos e recupera tudo', proteger: ' · protege-se neste turno', 'escudo-rei': ' · protege-se; quem lhe toca: ATQ -1',
+    espinhos: ' · protege-se; quem lhe toca perde 1/8', bunker: ' · protege-se; quem lhe toca fica envenenado', seda: ' · protege-se; quem lhe toca: VEL -1',
+    muralha: ' · protege-se; quem lhe toca fica queimado', obstruir: ' · protege-se; quem lhe toca: DEF -2', aguentar: ' · aguenta qualquer golpe com 1 HP',
+    reflect: ' · físicos a metade no teu lado (5 turnos)', 'light-screen': ' · especiais a metade no teu lado (5 turnos)',
+    aurora: ' · tudo a metade no teu lado (5 turnos, só com neve)', substituto: ' · gasta 1/4 do HP num substituto',
+    counter: ' · devolve a dobrar o dano físico recebido', mirror: ' · devolve a dobrar o dano especial recebido', metal: ' · devolve ×1,5 o dano recebido', 'cura-sol': ' · recupera 50% (mais com sol)', 'cura-areia': ' · recupera 50% (mais com areia)' };
   function efeitoTexto(g) {
     if (g.c === 'S') {
       return (g.ef ? efeitoEstagios(g).replace(' (100%)', '') : '') + (g.st ? ` · ${VERBO_EST[g.st[0]]}` : '') + (g.cura ? ` · recupera ${g.cura}% do HP` : '') + (TXT_ESP[g.esp] || '');
     }
+    if (g.esp in DEVOLVE) { return TXT_ESP[g.esp]; }
     var extra = (g.st ? ` · ${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}` : '') + (g.fl ? ` · ${g.fl}% recuar` : '') +
       (g.nome === 'Facade' ? ' · ×2 com estado próprio' : '') + (g.nome === 'Hex' || g.nome === 'Infernal Parade' ? ' · ×2 se o alvo tiver estado' : '') +
       (g.nome === 'Venoshock' || g.nome === 'Barb Barrage' ? ' · ×2 se o alvo estiver envenenado' : '');
@@ -1715,6 +1864,7 @@
   async function usarGolpe(lado, idx) {
     var B = S.B, foe = lado === 'j' ? 'o' : 'j', a = ativo(B[lado]), d = ativo(B[foe]);
     var quem = lado === 'j' ? esc(a.p.nome) : esc(a.p.nome) + ' inimigo';
+    a.agiu = true;
     var P0 = [], pode = antesDeAgir(a, P0);
     await mostrarPassos(P0);
     if (!pode) { if (a.hp <= 0) { await desmaiar(lado); return 'eu'; } await esperar(300); return false; }
@@ -1733,13 +1883,24 @@
       var PE = []; usarEstado(a, d, g, PE); await mostrarPassos(PE); atualizarHud(); await esperar(300);
       return false;
     }
+    var PB = [];
+    if (bloqueadoPorProtecao(a, d, g, PB)) { await mostrarPassos(PB); atualizarHud(); return false; }
+    partirBarreiras(a, d, g, PB); await mostrarPassos(PB);
     await animarAtaque(lado, foe, g);
     var r = calcular(a, d, g);
     if (r.erro || r.ef === 0) {
       var ev0 = efeitosDepois(a, d, g, r, 0, uso.idx);
-      if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); }
+      if (r.falhou) { mensagem('Mas falhou!'); registrar('Mas falhou!'); await esperar(650); }
+      else if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); }
       else if (r.bloq) { await mostrarPassos(ev0.passos); }
       else { bannerFx('NÃO AFETA', 'nul'); mensagem(`Não afeta ${esc(d.p.nome)}...`); registrar('Não afetou.'); await esperar(800); }
+      return false;
+    }
+    var PS = [], ns = noSubstituto(a, d, g, r, PS);
+    if (ns >= 0) {
+      textoFx('-' + ns, 'num', foe); await mostrarPassos(PS);
+      var evs = efeitosDepois(a, d, g, r, ns, uso.idx); await mostrarPassos(evs.passos); atualizarHud();
+      if (evs.cansou) { registrar(`<b>${esc(a.p.nome)}</b> acalmou-se.`); }
       return false;
     }
     impacto(foe, g.t, r.ef >= 2 || r.crit);
@@ -1748,7 +1909,8 @@
     var mon = $('mon-' + foe); if (mon) { mon.classList.remove('dano'); void mon.offsetWidth; mon.classList.add('dano'); }
     textoFx('-' + r.dano, 'num' + (r.ef >= 2 ? ' sup' : ''), foe);
     if (r.crit) { setTimeout(function () { textoFx('CRÍTICO!', 'crit', foe); }, 150); registrar(`<i class='crit'>Golpe crítico!</i>`); }
-    if (r.ef >= 2) { bannerFx('SUPER EFETIVO!', 'sup'); registrar(`<i class='sup'>Foi super efetivo! (×${r.ef})</i>`); }
+    if (r.fixo) { /* dano devolvido: sem efetividade */ }
+    else if (r.ef >= 2) { bannerFx('SUPER EFETIVO!', 'sup'); registrar(`<i class='sup'>Foi super efetivo! (×${r.ef})</i>`); }
     else if (r.ef < 1) { bannerFx('pouco efetivo...', 'pou'); registrar(`<i class='pou'>Não foi muito efetivo...</i>`); }
     await animarHp(foe, d);
     if (r.acertos > 1) { registrar(`Acertou ${r.acertos} vezes!`); }
@@ -1880,6 +2042,7 @@
     var B = S.B;
     if (S.auto && opcoesTransformar(B.j).length) { await transformar('j', opcoesTransformar(B.j)[0]); }
     if (opcoesTransformar(B.o).length) { await transformar('o', opcoesTransformar(B.o)[0]); }
+    limparTurno(B);
     var acoes = ordem(B, acaoJ, iaAcao(B.o, B.j));
     for (var k = 0; k < acoes.length; k++) {
       var lado = acoes[k].lado, ac = acoes[k].a;
@@ -1887,7 +2050,7 @@
         mensagem(lado === 'j' ? `<b>${esc(ativo(B.j).p.nome)}</b>, volte!` : `O oponente recolheu <b>${esc(ativo(B.o).p.nome)}</b>.`);
         var sai = $('mon-' + lado); if (sai) { sai.classList.add('sai'); }
         await esperar(450);
-        await entrar(lado, ac.idx); continue;
+        await entrar(lado, ac.idx); ativo(B[lado]).agiu = true; continue;
       }
       if (ativo(B[lado]).hp <= 0) { continue; }
       var ko = await usarGolpe(lado, ac.idx);
@@ -1895,6 +2058,7 @@
     }
     await mostrarPassos(fimTurnoClima(B, ['j', 'o']));
     await mostrarPassos(fimTurnoTerreno(B, ['j', 'o']));
+    await mostrarPassos(fimTurnoBarreiras(B, ['j', 'o']));
     await mostrarPassos(fimTurnoEstado(B, ['j', 'o']));
     for (var lg of ['j', 'o']) {
       var mg = ativo(B[lg]);
@@ -1962,6 +2126,7 @@
       var op = at.forma != null ? opcoesTransformar(B[lt])[at.forma] : null;
       if (op) { await transformar(lt, op); }
     }
+    limparTurno(B);
     var acoes = ordem(B, aj, ao);
     for (var k = 0; k < acoes.length; k++) {
       var lado = acoes[k].lado, ac = acoes[k].a;
@@ -1969,7 +2134,7 @@
         mensagem(lado === 'j' ? `<b>${esc(ativo(B.j).p.nome)}</b>, volte!` : `O oponente recolheu <b>${esc(ativo(B.o).p.nome)}</b>.`);
         var sai = $('mon-' + lado); if (sai) { sai.classList.add('sai'); }
         await esperar(450);
-        await entrar(lado, ac.idx); continue;
+        await entrar(lado, ac.idx); ativo(B[lado]).agiu = true; continue;
       }
       if (ativo(B[lado]).hp <= 0) { continue; }
       var ko = await usarGolpe(lado, ac.idx);
@@ -1977,6 +2142,7 @@
     }
     await mostrarPassos(fimTurnoClima(B, lados));
     await mostrarPassos(fimTurnoTerreno(B, lados));
+    await mostrarPassos(fimTurnoBarreiras(B, lados));
     await mostrarPassos(fimTurnoEstado(B, lados));
     for (var g = 0; g < 2; g++) {
       var lg = lados[g], mg = ativo(B[lg]);
@@ -1994,7 +2160,7 @@
   /* fim do turno: avança o contador e compara o estado com o do outro lado */
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
-      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat + '/' + (m.estado || '-'); }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l])) + ':' + ativo(B[l]).conf;
+      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat + '/' + (m.estado || '-'); }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l])) + ':' + ativo(B[l]).conf + ':' + (ativo(B[l]).sub || 0) + ':' + JSON.stringify(B.campo.tela[l]);
     }).join('|') + '|' + (B.campo.clima || '-') + B.campo.turnos + '|' + (B.campo.terreno || '-') + B.campo.tturnos;
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
@@ -2301,7 +2467,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, usarEstado: usarEstado, valorEstadoIA: valorEstadoIA, golpesAuto: golpesAuto, converterMv: converterMv, GR_NOME: GR_NOME, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, fimTurnoBarreiras: fimTurnoBarreiras, limparTurno: limparTurno, bloqueadoPorProtecao: bloqueadoPorProtecao, noSubstituto: noSubstituto, valorDevolve: valorDevolve, usarEstado: usarEstado, valorEstadoIA: valorEstadoIA, golpesAuto: golpesAuto, converterMv: converterMv, GR_NOME: GR_NOME, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
