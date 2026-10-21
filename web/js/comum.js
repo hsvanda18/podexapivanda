@@ -16,7 +16,7 @@
   var P = {}, LISTA = [];
   D.pk.forEach(function (r) {
     var p = { id: r[0], nome: r[1], esp: r[2], t: r[4] ? [r[3], r[4]] : [r[3]],
-      b: { hp: r[5], atk: r[6], def: r[7], spa: r[8], spd: r[9], spe: r[10] }, padrao: r[11] === 1, gen: r[12] || 0, lend: r[13] === 1 };
+      b: { hp: r[5], atk: r[6], def: r[7], spa: r[8], spd: r[9], spe: r[10] }, padrao: r[11] === 1, gen: r[12] || 0, lend: r[13] === 1, peso: r[15] || 0 };
     p.total = p.b.hp + p.b.atk + p.b.def + p.b.spa + p.b.spd + p.b.spe;
     P[p.id] = p; LISTA.push(p);
   });

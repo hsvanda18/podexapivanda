@@ -263,7 +263,7 @@ def montar_pokemon(raw):
     arena = {
         "v": len(out) * 1000 + len(gp),
         "pk": [[p["id"], p["nome"], p["esp"], p["t1"], p["t2"]] + [s or 1 for s in p["stats"]]
-               + [1 if p["padrao"] else 0, p["gen"] or 0, 1 if (p["lend"] or p["mit"]) else 0, p["pai"]] for p in out],
+               + [1 if p["padrao"] else 0, p["gen"] or 0, 1 if (p["lend"] or p["mit"]) else 0, p["pai"], p["peso"]] for p in out],
         "ef": ef, "gp": gp, "tp": tp,
     }
     # window.DEX_DADOS: colunas extras da Pokédex, por id
@@ -310,7 +310,7 @@ def montar_cartas(raw):
 
 # ---------- golpes reais (Arena) ----------
 CONSULTA_GOLPES = (
-    "{ m: pokemon_v2_move(where:{_or:[{power:{_gt:0}},{move_damage_class_id:{_eq:1}},{name:{_in:[\"counter\",\"mirror-coat\",\"metal-burst\",\"comeuppance\"]}}]}) { id name power accuracy priority pp move_damage_class_id type_id move_target_id "
+    "{ m: pokemon_v2_move(where:{_or:[{power:{_gt:0}},{move_damage_class_id:{_eq:1}},{name:{_in:[\"counter\",\"mirror-coat\",\"metal-burst\",\"comeuppance\",\"gyro-ball\",\"electro-ball\",\"low-kick\",\"grass-knot\",\"heavy-slam\",\"heat-crash\",\"reversal\",\"flail\",\"crush-grip\",\"wring-out\",\"hard-press\",\"punishment\"]}}]}) { id name power accuracy priority pp move_damage_class_id type_id move_target_id "
     "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id move_meta_ailment_id ailment_chance flinch_chance healing } "
     "sc: pokemon_v2_movemetastatchanges { change stat_id } "
     "n: pokemon_v2_movenames(where:{language_id:{_eq:9}}) { name } } "
@@ -324,9 +324,9 @@ GOLPES_FORA = {
     "prismatic-laser", "eternabeam", "meteor-assault", "solar-beam", "solar-blade", "sky-attack", "razor-wind",
     "skull-bash", "meteor-beam", "electro-shot", "freeze-shock", "ice-burn", "dig", "fly", "dive", "bounce",
     "phantom-force", "shadow-force", "sky-drop", "focus-punch", "future-sight", "doom-desire", "last-resort",
-    "belch", "fake-out", "first-impression", "dream-eater", "synchronoise", "burn-up", "double-shock",
+    "belch", "dream-eater", "synchronoise", "burn-up", "double-shock",
     "shell-trap", "spit-up", "snore", "steel-roller", "ice-spinner", "rising-voltage", "expanding-force",
-    "misty-terrain", "upper-hand", "thunderclap", "hyperspace-fury", "hyperspace-hole", "fling", "natural-gift",
+    "misty-terrain", "hyperspace-fury", "hyperspace-hole", "fling", "natural-gift",
 }
 
 
@@ -347,7 +347,7 @@ ESTADOS_EXTRA = {"tri-attack": ["tri", 20], "dire-claw": ["dire", 50], "mortal-s
                  "poison-fang": ["tox", 50], "malignant-chain": ["tox", 50], "barb-barrage": ["psn", 50],
                  "infernal-parade": ["brn", 30], "wildbolt-storm": ["par", 20], "sandsear-storm": ["brn", 20],
                  "axe-kick": ["conf", 30], "matcha-gotcha": ["brn", 20]}
-RECUO_EXTRA = {"triple-arrows": 30}
+RECUO_EXTRA = {"triple-arrows": 30, "fake-out": 100, "upper-hand": 100}
 
 
 def estado_golpe(m, meta):
@@ -373,7 +373,18 @@ CONTROLO = {"haze": "haze", "taunt": "taunt", "roar": "roar", "whirlwind": "roar
             "stealth-rock": "rochas", "spikes": "picos", "toxic-spikes": "picos-toxicos", "sticky-web": "teia",
             "defog": "defog", "tidy-up": "limpar"}
 # golpes de dano com regra própria: limpam as armadilhas do próprio lado ou obrigam o alvo a trocar
-DANO_ESP = {"rapid-spin": "giro", "mortal-spin": "giro", "dragon-tail": "arrastar", "circle-throw": "arrastar"}
+DANO_ESP = {"rapid-spin": "giro", "mortal-spin": "giro", "dragon-tail": "arrastar", "circle-throw": "arrastar",
+            "sucker-punch": "resposta", "thunderclap": "resposta", "upper-hand": "mao", "fake-out": "primeiro", "first-impression": "primeiro",
+            "feint": "finta", "psyshock": "psyshock", "psystrike": "psyshock", "secret-sword": "psyshock", "body-press": "body-press",
+            "foul-play": "foul-play", "sacred-sword": "ignora-est", "darkest-lariat": "ignora-est", "chip-away": "ignora-est",
+            "sunsteel-strike": "quebra", "moongeist-beam": "quebra", "photon-geyser": "quebra",
+            "gyro-ball": "giro-bola", "electro-ball": "electro-bola", "low-kick": "peso-alvo", "grass-knot": "peso-alvo",
+            "heavy-slam": "peso-razao", "heat-crash": "peso-razao", "reversal": "reversal", "flail": "reversal",
+            "crush-grip": "hp-alvo", "wring-out": "hp-alvo", "hard-press": "hp-alvo", "stored-power": "subidas", "power-trip": "subidas",
+            "punishment": "castigo"}
+# poder de referência dos golpes de poder variável (a Arena calcula o verdadeiro em cada golpe)
+PODER_VAR = {"gyro-ball": 80, "electro-ball": 80, "low-kick": 70, "grass-knot": 70, "heavy-slam": 80, "heat-crash": 80,
+             "reversal": 60, "flail": 60, "crush-grip": 90, "wring-out": 90, "hard-press": 75, "punishment": 60}
 # devolvem o dano recebido neste turno
 DEVOLVE = {"counter": "counter", "mirror-coat": "mirror", "metal-burst": "metal", "comeuppance": "metal"}
 CURA_CLIMA = {"synthesis": "cura-sol", "moonlight": "cura-sol", "morning-sun": "cura-sol", "shore-up": "cura-areia"}
@@ -433,7 +444,7 @@ def montar_golpes(raw, poke):
                 golpes.append((m["id"], [nome] + ge))
             continue
         crit = meta.get("crit_rate") or 0
-        golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"] or 0,
+        golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"] or PODER_VAR.get(m["name"], 0),
                                  m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
                                  meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0,
                                  m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"]) or DEVOLVE.get(m["name"]) or DANO_ESP.get(m["name"], ""),
