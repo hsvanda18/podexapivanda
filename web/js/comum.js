@@ -56,6 +56,25 @@
     el.setAttribute('data-alt', alts.slice(1).join('|'));
     el.src = alts[0];
   };
+  /* estado guardado no aparelho: o telemóvel pode fechar o separador quando a app é minimizada */
+  var PREFIXO = 'pkdx:';
+  function guardar(chave, obj) {
+    try { window.localStorage.setItem(PREFIXO + chave, JSON.stringify({ em: Date.now(), d: obj })); } catch (e) { /* sem espaço ou bloqueado */ }
+  }
+  function restaurar(chave, horas) {
+    try {
+      var x = JSON.parse(window.localStorage.getItem(PREFIXO + chave) || 'null');
+      if (!x || (horas && Date.now() - x.em > horas * 3600000)) { return null; }
+      return x.d;
+    } catch (e) { return null; }
+  }
+  function esquecer(chave) { try { window.localStorage.removeItem(PREFIXO + chave); } catch (e) { /* ignora */ } }
+  /* corre fn quando a página fica escondida (minimizar, trocar de app) ou é fechada */
+  function aoSair(fn) {
+    var f = function () { try { fn(); } catch (e) { /* não impede a saída */ } };
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') { f(); } });
+    window.addEventListener('pagehide', f);
+  }
   /* palco fixo de 1280x720 escalado para caber no visual */
   function escala(raiz) {
     var palco = raiz.querySelector('.pk-palco');
@@ -82,5 +101,5 @@
 
   window.PK = { v: D.v, D: D, P: P, LISTA: LISTA, TIPOS: TIPOS, ef: ef, efTotal: efTotal, corTipo: corTipo,
     nomeTipo: nomeTipo, icone: icone, chip: chip, esc: esc, fmtEf: fmtEf, normalizar: normalizar, URL: URL,
-    img: img, escala: escala, SPR: SPR, aleatorio: aleatorio, embaralhar: embaralhar, particulas: particulas };
+    img: img, escala: escala, SPR: SPR, guardar: guardar, restaurar: restaurar, esquecer: esquecer, aoSair: aoSair, aleatorio: aleatorio, embaralhar: embaralhar, particulas: particulas };
 })();

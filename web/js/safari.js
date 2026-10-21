@@ -40,6 +40,15 @@
   function ruido(x, y, k) { var n = Math.sin(x * 127.1 + y * 311.7 + k * 74.7) * 43758.5453; return n - Math.floor(n); }
 
   /* ================= ESTADO ================= */
+  if (!window.__safari) {
+    var salvo = K.restaurar('safari');
+    if (salvo && salvo.v2) {
+      salvo.anda = null; salvo.tecla = null; salvo.folhas = null;
+      if (salvo.luta && salvo.luta.fase === 'fim') { salvo.luta = null; }
+      if (salvo.luta) { salvo.luta.entrou = false; }
+      window.__safari = salvo;
+    }
+  }
   var S = window.__safari;
   if (!S || !S.v2) {
     S = window.__safari = { v2: true, x: 14, y: 10, dir: 'baixo', passo: 0, anda: null, gen: 0, folhas: null,
@@ -491,6 +500,10 @@
   window.__safariApi = { chanceFuga: chanceFuga, atirar: atirar, chanceCaptura: chanceCaptura, taxaCaptura: taxaCaptura, sortearPokemon: sortearPokemon, mover: mover, tile: tile, encontro: encontro, dexHtml: dexHtml, acaoDex: acaoDex };
   if (window.__safariLaco && window.cancelAnimationFrame) { window.cancelAnimationFrame(window.__safariLaco); }
   if (S.luta && S.luta.fase !== 'menu') { S.luta.fase = 'menu'; S.luta.texto = 'O que você vai fazer?'; }
+  if (!window.__safariGuarda) {
+    window.__safariGuarda = true;
+    K.aoSair(function () { var s = window.__safari; if (s) { K.guardar('safari', Object.assign({}, s, { anda: null, tecla: null, folhas: null })); } });
+  }
   render();
   laco(0);
 })();

@@ -381,9 +381,18 @@
     if (ev.key === 'Escape') { $('dx-zoom').hidden = true; abrirLista(false); }
   });
 
+  // estado guardado (filtros, modo, seleção); o #id do link tem prioridade
+  var salvo = K.restaurar('dex', 24);
+  if (salvo) {
+    ['gen', 'tipo', 'lend', 'busca', 'lista', 'evo', 'forma', 'modo', 'gfil'].forEach(function (k) { if (salvo[k] !== undefined) { S[k] = salvo[k]; } });
+    $('dx-gen').value = S.gen || ''; $('dx-tipo').value = S.tipo || ''; $('dx-busca').value = S.busca || '';
+  }
+  K.aoSair(function () {
+    K.guardar('dex', { gen: S.gen, tipo: S.tipo, lend: S.lend, busca: S.busca, lista: S.lista, evo: S.evo, forma: S.forma, modo: S.modo, gfil: S.gfil });
+  });
   // link direto: index.html#25 abre o Pikachu
   var h = +(location.hash || '').slice(1);
-  if (P[h]) { var base = P[h].padrao ? h : (PADRAO.find(function (x) { return x.esp === P[h].esp; }) || {}).id; S.lista = base; if (h !== base) { S.forma = h; } }
+  if (P[h] && h !== idSel()) { var base = P[h].padrao ? h : (PADRAO.find(function (x) { return x.esp === P[h].esp; }) || {}).id; S.lista = base; S.evo = null; S.forma = h !== base ? h : null; }
 
   renderLista();
   renderSel();

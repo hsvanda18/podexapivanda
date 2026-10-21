@@ -4,7 +4,9 @@
   var K = window.PK, raiz = document.getElementById('app-raiz');
   if (!K || !raiz) { return; }
   var T = K.TIPOS, icone = K.icone, nomeTipo = K.nomeTipo, corTipo = K.corTipo;
+  if (!window.__tipos) { var salvo = K.restaurar('tipos'); if (salvo) { salvo.foco = null; window.__tipos = salvo; } }
   var S = window.__tipos || (window.__tipos = { aba: 'roda', modo: 'ataque', atk: 'fire', def: ['grass'], foco: null });
+  if (!window.__tiposGuarda) { window.__tiposGuarda = true; K.aoSair(function () { if (window.__tipos) { K.guardar('tipos', window.__tipos); } }); }
   function $(id) { return document.getElementById(id); }
 
   /* ================= RODA ================= */

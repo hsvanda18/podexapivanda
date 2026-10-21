@@ -211,6 +211,32 @@
   }
 
   /* ================= ESTADO ================= */
+  /* fotografia da batalha local (só entre turnos): Pokémon por id, com HP, forma e golpes */
+  function fotoLutador(m) {
+    return { pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null };
+  }
+  function lutadorDaFoto(f) {
+    var p = P[f.pid]; if (!p) { return null; }
+    return { p: p, st: statusDe(p.b), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax };
+  }
+  function fotoBatalha(B) {
+    var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
+    return { j: lado(B.j), o: lado(B.o) };
+  }
+  function batalhaDaFoto(f) {
+    var lado = function (l) { return { ativo: l.ativo, transformou: l.transformou, time: l.time.map(lutadorDaFoto) }; };
+    var B = { j: lado(f.j), o: lado(f.o) };
+    return B.j.time.every(Boolean) && B.o.time.every(Boolean) ? B : null;
+  }
+  if (!window.__arena) {
+    var salvo = K.restaurar('arena', 72);
+    if (salvo && salvo.versao === D.v) {
+      salvo.B = salvo.foto ? batalhaDaFoto(salvo.foto) : null;
+      if (!salvo.B && salvo.tela === 'batalha') { salvo.tela = 'selecao'; }
+      Object.assign(salvo, { ocupado: false, auto: false, sim: null, previa: null, foto: null, ge: null, online: false, on: null });
+      window.__arena = salvo;
+    }
+  }
   var S = window.__arena;
   if (!S || S.versao !== D.v) {
     S = window.__arena = { versao: D.v, tela: 'selecao', modo: 3, lado: 'j', time: { j: [], o: [] }, busca: '', tipo: '', gen: 0,
@@ -533,7 +559,10 @@
   }
 
   /* ================= RENDER ================= */
+  var fotoEstavel = null;
   function render() {
+    // guarda a batalha local só em momentos estáveis (fora das animações de um turno)
+    if (S.tela === 'batalha' && S.B && !S.B.online && !S.ocupado) { fotoEstavel = { B: fotoBatalha(S.B), log: S.log.slice(-60), msg: S.msg, escolha: S.escolha, fim: S.fim }; }
     raiz.innerHTML = S.tela === 'batalha' && S.B ? telaBatalha() : telaSelecao();
     K.escala(raiz);
     var log = $('ar-log'); if (log) { log.scrollTop = log.scrollHeight; }
@@ -1060,6 +1089,16 @@
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   if (codigoLink && NET && NET.estado === 'off') { S.online = true; S.lado = 'j'; S.on.codigo = codigoLink; NET.entrar(codigoLink); }
+  if (!window.__arenaGuarda) {
+    window.__arenaGuarda = true;
+    K.aoSair(function () {
+      var s = window.__arena; if (!s) { return; }
+      var local = s.tela === 'batalha' && s.B && !s.B.online && fotoEstavel;
+      K.guardar('arena', { versao: s.versao, tela: local ? 'batalha' : 'selecao', modo: s.modo, lado: s.lado, time: s.online ? { j: s.time.j, o: [] } : s.time,
+        mv: s.online ? { j: s.mv.j, o: {} } : s.mv, busca: s.busca, tipo: s.tipo, gen: s.gen, log: local ? fotoEstavel.log : [],
+        msg: local ? fotoEstavel.msg : '', escolha: local ? fotoEstavel.escolha : null, fim: local ? fotoEstavel.fim : null, foto: local ? fotoEstavel.B : null });
+    });
+  }
   render();
   if (S.auto && S.tela === 'batalha' && !S.ocupado) { proximoAuto(); }
 })();

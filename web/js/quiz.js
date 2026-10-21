@@ -8,6 +8,14 @@
   function lerRecorde() { try { return +(window.localStorage.getItem('pkQuizRecorde') || 0); } catch (e) { return 0; } }
   function salvarRecorde(v) { try { window.localStorage.setItem('pkQuizRecorde', String(v)); } catch (e) { /* armazenamento indisponível */ } }
 
+  if (!window.__quiz) {
+    var salvo = K.restaurar('quiz', 24);
+    if (salvo) {
+      salvo.timer = null; salvo.recorde = Math.max(salvo.recorde || 0, lerRecorde());
+      if (salvo.fase === 'pergunta' && salvo.atual) { salvo.inicio = Date.now() - (TEMPO - (salvo.restante || TEMPO)) * 1000; }
+      window.__quiz = salvo;
+    }
+  }
   var S = window.__quiz || (window.__quiz = { modo: 'opcoes', gens: [], pontos: 0, seq: 0, recorde: lerRecorde(), acertos: 0, total: 0,
     hist: [], atual: null, opcoes: [], dicas: 0, fase: 'pergunta', resposta: null, inicio: 0, restante: TEMPO, timer: null });
 
@@ -146,4 +154,14 @@
   if (!window.__quizResize) { window.__quizResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
   render();
   if (S.fase === 'pergunta' && S.atual) { iniciarTimer(); }
+  if (!window.__quizGuarda) {
+    window.__quizGuarda = true;
+    K.aoSair(function () { var s = window.__quiz; if (s) { K.guardar('quiz', Object.assign({}, s, { timer: null })); } });
+    // o tempo da pergunta não corre enquanto a app está minimizada
+    document.addEventListener('visibilitychange', function () {
+      var s = window.__quiz; if (!s || s.fase !== 'pergunta' || !s.atual) { return; }
+      if (document.visibilityState === 'hidden') { s.pausa = s.restante; }
+      else if (s.pausa != null) { s.inicio = Date.now() - (TEMPO - s.pausa) * 1000; s.pausa = null; }
+    });
+  }
 })();
