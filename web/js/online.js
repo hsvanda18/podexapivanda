@@ -92,7 +92,7 @@
     if (sinal !== at.outroTime) {
       at.outroTime = sinal;
       var gi = separarItens(r[col('golpes', o)]);
-      entregar({ t: 'time', ids: r[col('time', o)], mv: gi.mv, itens: gi.itens, pronto: r[col('pronto', o)] });
+      entregar({ t: 'time', ids: r[col('time', o)], mv: gi.mv, itens: gi.itens, nat: gi.nat, hab: gi.hab, pronto: r[col('pronto', o)] });
     }
     if (r.estado === 'batalha' && r.inicio && r.partida > at.partida) {
       at.partida = r.partida;
@@ -105,11 +105,11 @@
       if (at.pedidoSala) { at.pedidoSala = false; } else { entregar({ t: 'sala' }); }
     }
   }
-  /* os itens (Pedra Mega / Fator Gigantamax) vão na mesma coluna dos golpes, na chave _itens */
+  /* itens (Pedra Mega / Fator Gigantamax), natures e habilidades vão na mesma coluna dos golpes, nas chaves _itens, _nat e _hab */
   function separarItens(g) {
-    var mv = {}, itens = (g && g._itens) || {};
-    Object.keys(g || {}).forEach(function (k) { if (k !== '_itens') { mv[k] = g[k]; } });
-    return { mv: mv, itens: itens };
+    var mv = {};
+    Object.keys(g || {}).forEach(function (k) { if (k.charAt(0) !== '_') { mv[k] = g[k]; } });
+    return { mv: mv, itens: (g && g._itens) || {}, nat: (g && g._nat) || {}, hab: (g && g._hab) || {} };
   }
   function aoJogada(j) {
     if (!at || at.vistos[j.id]) { return; }
@@ -223,11 +223,11 @@
       case 'ola': return true; // a versão vai na Presence
       case 'modo': gravar(function () { return sb.from('salas').update({ modo: m.m }).eq('codigo', c); }); return true;
       case 'time':
-        mud[col('time', eu)] = m.ids || []; mud[col('golpes', eu)] = Object.assign({}, m.mv || {}, { _itens: m.itens || {} }); mud[col('pronto', eu)] = !!m.pronto;
+        mud[col('time', eu)] = m.ids || []; mud[col('golpes', eu)] = Object.assign({}, m.mv || {}, { _itens: m.itens || {}, _nat: m.nat || {}, _hab: m.hab || {} }); mud[col('pronto', eu)] = !!m.pronto;
         gravar(function () { return sb.from('salas').update(mud).eq('codigo', c); }); return true;
       case 'inicio':
         at.partida = at.row.partida + 1;
-        var cfg = { semente: m.semente, modo: m.modo, times: m.times, mv: m.mv, itens: m.itens };
+        var cfg = { semente: m.semente, modo: m.modo, times: m.times, mv: m.mv, itens: m.itens, nat: m.nat, hab: m.hab };
         gravar(function () { return sb.from('salas').update({ estado: 'batalha', partida: at.partida, inicio: cfg, pronto_host: false, pronto_conv: false }).eq('codigo', c); });
         return true;
       case 'sala': at.pedidoSala = true; gravar(function () { return sb.from('salas').update({ estado: 'sala' }).eq('codigo', c); }); return true;

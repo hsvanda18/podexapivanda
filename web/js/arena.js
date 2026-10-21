@@ -29,7 +29,7 @@
     return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9],
       pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '' };
   }) : [];
-  var VERSAO = D.v + '.' + GR.length + '.r2';
+  var VERSAO = D.v + '.' + GR.length + '.r3';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -76,9 +76,48 @@
   function baseDe(p) { return ehFormaEspecial(p) ? (LISTA.find(function (x) { return x.esp === p.esp && x.padrao; }) || p) : p; }
   function nivelFormula(p) { return Math.max(40, Math.min(100, Math.round(50 * Math.pow(500 / Math.max(180, p.total), 1.1)))); }
   function nivelDe(p) { var b = baseDe(p); return NIV[b.id] || nivelFormula(b); }
-  function statusDe(b, nv) {
-    var f = function (x) { return Math.floor((2 * x + 31) * nv / 100) + 5; };
-    return { hp: Math.floor((2 * b.hp + 31) * nv / 100) + nv + 10, atk: f(b.atk), def: f(b.def), spa: f(b.spa), spd: f(b.spd), spe: f(b.spe) };
+  /* IV 31, sem EVs; a nature dá ×1,1 a um atributo e ×0,9 a outro (nunca ao HP) */
+  function statusDe(b, nv, nat) {
+    var n = NATURES[nat] || NATURES[0];
+    var f = function (x, k) { var v = Math.floor((2 * x + 31) * nv / 100) + 5; return n.sobe === k ? Math.floor(v * 1.1) : n.desce === k ? Math.floor(v * 0.9) : v; };
+    return { hp: Math.floor((2 * b.hp + 31) * nv / 100) + nv + 10, atk: f(b.atk, 'atk'), def: f(b.def, 'def'), spa: f(b.spa, 'spa'), spd: f(b.spd, 'spd'), spe: f(b.spe, 'spe') };
+  }
+
+  /* ---------- natures: as 25 dos jogos, pela ordem oficial (linha = sobe, coluna = desce) ---------- */
+  var ORDEM_NAT = ['atk', 'def', 'spe', 'spa', 'spd'];
+  var NATURES = ['Hardy', 'Lonely', 'Brave', 'Adamant', 'Naughty', 'Bold', 'Docile', 'Relaxed', 'Impish', 'Lax', 'Timid', 'Hasty', 'Serious', 'Jolly', 'Naive',
+    'Modest', 'Mild', 'Quiet', 'Bashful', 'Rash', 'Calm', 'Gentle', 'Sassy', 'Careful', 'Quirky'].map(function (nome, i) {
+    var s = ORDEM_NAT[Math.floor(i / 5)], d = ORDEM_NAT[i % 5];
+    return { i: i, nome: nome, sobe: s === d ? null : s, desce: s === d ? null : d };
+  });
+  function natDe(nome) { return NATURES.find(function (n) { return n.nome === nome; }).i; }
+  /* perfil de ataque: que atributos de ataque os golpes escolhidos usam */
+  function perfil(p, golpes) {
+    var F = 0, E = 0;
+    golpes.forEach(function (g) { if (g.c === 'F') { F += forca(p, g) || 1; } else { E += forca(p, g) || 1; } });
+    var tot = F + E || 1;
+    return { F: F / tot >= 0.2, E: E / tot >= 0.2 };
+  }
+  function pesoAtr(k, pf) {
+    if (k === 'atk') { return pf.F ? (pf.E ? 1.5 : 2) : 0; }
+    if (k === 'spa') { return pf.E ? (pf.F ? 1.5 : 2) : 0; }
+    return k === 'spe' ? 1.5 : 1;
+  }
+  /* benéfica (sobe algo útil, baixa o que não usa), neutra ou prejudicial (baixa o ataque que usa ou a velocidade) */
+  function classeNat(i, p, golpes) {
+    var n = NATURES[i]; if (!n.sobe) { return 'neutra'; }
+    var pf = perfil(p, golpes), s = pesoAtr(n.sobe, pf) - pesoAtr(n.desce, pf);
+    if (s <= -0.5 || ((n.desce === 'atk' && pf.F && !pf.E) || (n.desce === 'spa' && pf.E && !pf.F))) { return 'ma'; }
+    return s >= 0.5 && n.desce !== 'spe' ? 'boa' : 'neutra';
+  }
+  var ROTULO_NAT = { boa: '🟢 Benéfica', neutra: '⚪ Neutra', ma: '🔴 Prejudicial' };
+  /* escolha automática: a melhor benéfica para o perfil (rápidos sobem a Velocidade) */
+  function natAuto(p, golpes) {
+    var pf = perfil(p, golpes), rapido = p.b.spe >= 80, b = p.b;
+    if (pf.F && !pf.E) { return natDe(rapido ? 'Jolly' : 'Adamant'); }
+    if (pf.E && !pf.F) { return natDe(rapido ? 'Timid' : 'Modest'); }
+    if (rapido) { return natDe(b.def <= b.spd ? 'Hasty' : 'Naive'); }
+    return b.atk >= b.spa ? natDe(b.def <= b.spd ? 'Lonely' : 'Naughty') : natDe(b.def <= b.spd ? 'Mild' : 'Rash');
   }
 
   /* ---------- evolução em batalha: ao derrubar um adversário, evolui para o próximo estágio ---------- */
@@ -87,18 +126,129 @@
   Object.keys(FILHOS).forEach(function (k) { FILHOS[k].sort(function (a, b) { return a.esp - b.esp; }); });
   function evolucaoDe(p) { var f = FILHOS[p.esp]; return f && f.length ? f[0] : null; }
 
-  /* ---------- habilidades que travam (por espécie) ---------- */
-  var PREGUICA = { 289: 1 };   // Slaking (Truant): ataca um turno sim, outro não
-  var LENTO = { 486: 1 };      // Regigigas (Slow Start): metade do Ataque e da Velocidade nos 5 primeiros turnos em campo
+  /* ---------- habilidades (dados/habilidades.js) ---------- */
+  /* [valor para a escolha automática, o que faz na Arena]. As que não estão aqui (clima, estados, terrenos...) não têm efeito. */
+  var HAB_INFO = {
+    'huge-power': [10, 'Ataque ×2'], 'pure-power': [10, 'Ataque ×2'],
+    'adaptability': [7, 'STAB ×2 em vez de ×1,5'], 'technician': [6, 'golpes de poder 60 ou menos ×1,5'],
+    'sheer-force': [6, 'golpes com efeito secundário ×1,3, mas sem o efeito'], 'tough-claws': [6, 'golpes físicos ×1,3'],
+    'iron-fist': [5, 'socos ×1,2'], 'strong-jaw': [6, 'mordidas ×1,5'], 'mega-launcher': [6, 'golpes de pulso e de aura ×1,5'],
+    'sharpness': [6, 'golpes cortantes ×1,5'], 'reckless': [5, 'golpes com recuo ×1,2'], 'punk-rock': [5, 'golpes sonoros ×1,3; recebe metade dos sonoros'],
+    'hustle': [5, 'Ataque ×1,5, mas os golpes físicos têm 80% da precisão'],
+    'blaze': [4, 'golpes de Fogo ×1,5 com HP ≤ 1/3'], 'torrent': [4, 'golpes de Água ×1,5 com HP ≤ 1/3'],
+    'overgrow': [4, 'golpes de Planta ×1,5 com HP ≤ 1/3'], 'swarm': [4, 'golpes de Inseto ×1,5 com HP ≤ 1/3'],
+    'tinted-lens': [6, 'golpes pouco efetivos fazem o dobro'], 'neuroforce': [5, 'golpes super efetivos ×1,25'],
+    'sniper': [3, 'golpes críticos ×2,25'], 'super-luck': [3, 'mais golpes críticos'], 'skill-link': [6, 'golpes múltiplos acertam sempre o máximo'],
+    'compound-eyes': [3, 'precisão ×1,3'], 'victory-star': [2, 'precisão ×1,1'], 'no-guard': [3, 'nenhum golpe falha, dos dois lados'],
+    'pixilate': [7, 'golpes Normal viram Fada e fazem ×1,2'], 'refrigerate': [7, 'golpes Normal viram Gelo e fazem ×1,2'],
+    'aerilate': [7, 'golpes Normal viram Voador e fazem ×1,2'], 'galvanize': [7, 'golpes Normal viram Elétrico e fazem ×1,2'],
+    'liquid-voice': [3, 'golpes sonoros viram Água'], 'protean': [6, 'STAB em todos os golpes'], 'libero': [6, 'STAB em todos os golpes'],
+    'parental-bond': [8, 'ataca duas vezes (o 2.º golpe a 25%)'], 'scrappy': [3, 'Normal e Lutador acertam Fantasma; imune a Intimidate'],
+    'mold-breaker': [4, 'ignora as habilidades defensivas do alvo'], 'teravolt': [4, 'ignora as habilidades defensivas do alvo'], 'turboblaze': [4, 'ignora as habilidades defensivas do alvo'],
+    'steelworker': [4, 'golpes de Aço ×1,5'], 'steely-spirit': [4, 'golpes de Aço ×1,5'], 'dragons-maw': [4, 'golpes de Dragão ×1,5'],
+    'transistor': [4, 'golpes Elétrico ×1,3'], 'rocky-payload': [4, 'golpes de Pedra ×1,5'], 'water-bubble': [8, 'golpes de Água ×2; Fogo recebido ×0,5'],
+    'orichalcum-pulse': [6, 'Ataque ×1,33'], 'hadron-engine': [6, 'Atq. Esp. ×1,33'],
+    'fairy-aura': [4, 'golpes de Fada ×1,33 (para os dois lados)'], 'dark-aura': [4, 'golpes Sombrio ×1,33 (para os dois lados)'],
+    'sword-of-ruin': [5, 'Defesa do adversário ×0,75'], 'beads-of-ruin': [5, 'Def. Esp. do adversário ×0,75'],
+    'tablets-of-ruin': [5, 'Ataque do adversário ×0,75'], 'vessel-of-ruin': [5, 'Atq. Esp. do adversário ×0,75'],
+    'gale-wings': [5, 'golpes Voador com prioridade +1 com o HP cheio'], 'triage': [4, 'golpes que drenam com prioridade +3'],
+    'serene-grace': [4, 'efeitos secundários com o dobro da chance'], 'pressure': [3, 'o adversário gasta 2 PP por golpe'],
+    'moxie': [6, 'ao derrubar um adversário: Ataque +1'], 'chilling-neigh': [6, 'ao derrubar um adversário: Ataque +1'],
+    'as-one-glastrier': [6, 'ao derrubar um adversário: Ataque +1'], 'grim-neigh': [6, 'ao derrubar um adversário: Atq. Esp. +1'],
+    'as-one-spectrier': [6, 'ao derrubar um adversário: Atq. Esp. +1'], 'beast-boost': [6, 'ao derrubar um adversário: o melhor atributo +1'],
+    'defeatist': [-3, 'Ataque e Atq. Esp. a metade com HP abaixo de 50%'],
+    'truant': [-8, 'ataca um turno sim, outro não'], 'slow-start': [-6, 'Ataque e Velocidade a metade nos 5 primeiros turnos em campo'],
+    'speed-boost': [7, 'Velocidade +1 no fim de cada turno'], 'moody': [6, 'fim de cada turno: um atributo +2 e outro −1'],
+    'intimidate': [6, 'ao entrar: Ataque do adversário −1'], 'download': [5, 'ao entrar: Ataque ou Atq. Esp. +1 (o que o adversário defende pior)'],
+    'intrepid-sword': [7, 'ao entrar pela 1.ª vez: Ataque +1'], 'dauntless-shield': [5, 'ao entrar pela 1.ª vez: Defesa +1'],
+    'trace': [3, 'ao entrar: copia a habilidade do adversário'], 'regenerator': [5, 'ao sair de campo recupera 1/3 do HP'],
+    'contrary': [4, 'as mudanças de atributos são invertidas'], 'simple': [4, 'as mudanças de atributos contam a dobrar'],
+    'unaware': [5, 'ignora as mudanças de atributos do adversário'],
+    'clear-body': [3, 'o adversário não lhe baixa atributos'], 'white-smoke': [3, 'o adversário não lhe baixa atributos'],
+    'full-metal-body': [3, 'o adversário não lhe baixa atributos'], 'mirror-armor': [4, 'devolve ao adversário as baixas de atributos'],
+    'hyper-cutter': [2, 'o Ataque não pode ser baixado'], 'big-pecks': [1, 'a Defesa não pode ser baixada'],
+    'defiant': [4, 'quando o adversário lhe baixa um atributo: Ataque +2'], 'competitive': [4, 'quando o adversário lhe baixa um atributo: Atq. Esp. +2'],
+    'inner-focus': [1, 'imune a Intimidate'], 'oblivious': [1, 'imune a Intimidate'], 'own-tempo': [1, 'imune a Intimidate'],
+    'guard-dog': [3, 'Intimidate sobe-lhe o Ataque em vez de baixar'],
+    'magic-guard': [4, 'só perde HP com golpes (sem recuo nem dano de habilidades)'], 'rock-head': [3, 'sem recuo dos golpes'],
+    'liquid-ooze': [2, 'quem o drena perde HP em vez de recuperar'], 'shield-dust': [2, 'protegido dos efeitos secundários'],
+    'battle-armor': [2, 'não sofre golpes críticos'], 'shell-armor': [2, 'não sofre golpes críticos'],
+    'levitate': [5, 'imune a golpes de Terra'], 'flash-fire': [5, 'imune a Fogo; depois disso, os golpes de Fogo dele ×1,5'],
+    'water-absorb': [5, 'imune a Água e recupera 1/4 do HP'], 'volt-absorb': [5, 'imune a Elétrico e recupera 1/4 do HP'],
+    'dry-skin': [3, 'imune a Água (recupera 1/4 do HP); Fogo recebido ×1,25'], 'earth-eater': [5, 'imune a Terra e recupera 1/4 do HP'],
+    'lightning-rod': [5, 'imune a Elétrico; Atq. Esp. +1'], 'storm-drain': [5, 'imune a Água; Atq. Esp. +1'],
+    'motor-drive': [5, 'imune a Elétrico; Velocidade +1'], 'sap-sipper': [5, 'imune a Planta; Ataque +1'], 'well-baked-body': [5, 'imune a Fogo; Defesa +2'],
+    'wonder-guard': [8, 'só os golpes super efetivos lhe acertam'], 'bulletproof': [3, 'imune a bombas e esferas'], 'soundproof': [3, 'imune a golpes sonoros'],
+    'dazzling': [3, 'imune a golpes com prioridade'], 'queenly-majesty': [3, 'imune a golpes com prioridade'], 'armor-tail': [3, 'imune a golpes com prioridade'],
+    'thick-fat': [5, 'Fogo e Gelo recebidos ×0,5'], 'heatproof': [3, 'Fogo recebido ×0,5'], 'purifying-salt': [4, 'Fantasma recebido ×0,5'],
+    'fluffy': [5, 'golpes físicos recebidos ×0,5; Fogo recebido ×2'], 'ice-scales': [6, 'golpes especiais recebidos ×0,5'], 'fur-coat': [8, 'golpes físicos recebidos ×0,5'],
+    'multiscale': [6, 'com o HP cheio, recebe metade do dano'], 'shadow-shield': [6, 'com o HP cheio, recebe metade do dano'],
+    'filter': [5, 'super efetivos recebidos ×0,75'], 'solid-rock': [5, 'super efetivos recebidos ×0,75'], 'prism-armor': [5, 'super efetivos recebidos ×0,75'],
+    'sturdy': [4, 'com o HP cheio, aguenta qualquer golpe com 1 HP'], 'disguise': [7, 'o primeiro golpe só lhe tira 1/8 do HP'], 'ice-face': [5, 'o primeiro golpe físico não lhe faz dano'],
+    'rough-skin': [4, 'quem o ataca com golpe físico perde 1/8 do HP'], 'iron-barbs': [4, 'quem o ataca com golpe físico perde 1/8 do HP'],
+    'justified': [3, 'atingido por golpe Sombrio: Ataque +1'], 'weak-armor': [3, 'atingido por golpe físico: Defesa −1, Velocidade +2'],
+    'stamina': [5, 'sempre que é atingido: Defesa +1'], 'rattled': [2, 'atingido por Inseto, Fantasma ou Sombrio: Velocidade +1'],
+    'steam-engine': [4, 'atingido por Fogo ou Água: Velocidade +6'], 'thermal-exchange': [3, 'atingido por Fogo: Ataque +1'],
+    'berserk': [4, 'ao cair abaixo de metade do HP: Atq. Esp. +1'], 'anger-shell': [5, 'ao cair abaixo de metade do HP: Ataque, Atq. Esp. e Velocidade +1, defesas −1'],
+    'anger-point': [3, 'ao sofrer um crítico: Ataque no máximo'], 'gooey': [3, 'quem o ataca com golpe físico: Velocidade −1'],
+    'tangling-hair': [3, 'quem o ataca com golpe físico: Velocidade −1'], 'cotton-down': [3, 'sempre que é atingido: Velocidade do adversário −1'],
+    'aftermath': [2, 'derrubado por golpe físico: o atacante perde 1/4 do HP'], 'innards-out': [3, 'ao ser derrubado, fere o atacante com o HP que tinha']
+  };
+  var HD = window.HABILIDADES_DADOS || { h: [], a: {} };
+  var NOME_HAB = {}; HD.h.forEach(function (h) { NOME_HAB[h[0]] = h[1]; });
+  function habsDe(p) {
+    var l = HD.a[p.id];
+    if (!l) { var b = LISTA.find(function (x) { return x.esp === p.esp && x.padrao; }); l = b && HD.a[b.id]; }
+    return (l || []).map(function (x) { var h = HD.h[x < 0 ? -x - 1 : x]; return { slug: h[0], nome: h[1], oculta: x < 0 }; });
+  }
+  function valorHab(slug) { return HAB_INFO[slug] ? HAB_INFO[slug][0] : 0; }
+  function habAuto(p) {
+    var l = habsDe(p), melhor = 0;
+    l.forEach(function (h, i) { if (valorHab(h.slug) > valorHab(l[melhor].slug)) { melhor = i; } });
+    return melhor;
+  }
+  /* ao evoluir, a habilidade fica na mesma posição (a oculta passa para a oculta) */
+  function habEvolucao(nova, antiga) {
+    var l = habsDe(nova); if (!l.length) { return ''; }
+    var mesma = l.find(function (h) { return h.slug === antiga.slug; });
+    if (mesma) { return mesma.slug; }
+    var normais = l.filter(function (h) { return !h.oculta; }), oc = l.find(function (h) { return h.oculta; });
+    return (antiga.oculta && oc ? oc : normais[Math.min(antiga.pos || 0, normais.length - 1)] || l[0]).slug;
+  }
+  function hab(m) { return (m && m.hab) || ''; }
+  function nomeHab(slug) { return NOME_HAB[slug] || slug; }
+  var INQUEBRAVEL = { 'shadow-shield': 1, 'prism-armor': 1, 'full-metal-body': 1 };
+  function quebra(a) { var h = hab(a); return h === 'mold-breaker' || h === 'teravolt' || h === 'turboblaze'; }
+  /* a habilidade do alvo, a não ser que o atacante a ignore (Mold Breaker) */
+  function habAlvo(a, d) { var h = hab(d); return quebra(a) && !INQUEBRAVEL[h] ? '' : h; }
+  var PELE = { pixilate: 'fairy', refrigerate: 'ice', aerilate: 'flying', galvanize: 'electric' };
+  var APERTO = { blaze: 'fire', torrent: 'water', overgrow: 'grass', swarm: 'bug' };
+  var TIPO_FORTE = { steelworker: ['steel', 1.5], 'steely-spirit': ['steel', 1.5], 'dragons-maw': ['dragon', 1.5], transistor: ['electric', 1.3], 'rocky-payload': ['rock', 1.5], 'water-bubble': ['water', 2] };
+  var ABSORVE = { 'flash-fire': 'fire', 'well-baked-body': 'fire', 'water-absorb': 'water', 'storm-drain': 'water', 'dry-skin': 'water',
+    'volt-absorb': 'electric', 'lightning-rod': 'electric', 'motor-drive': 'electric', 'sap-sipper': 'grass', 'earth-eater': 'ground', levitate: 'ground' };
+  var SEM_BAIXAS = { 'clear-body': 1, 'white-smoke': 1, 'full-metal-body': 1 };
+  var SEM_INTIMIDAR = { 'inner-focus': 1, oblivious: 1, 'own-tempo': 1, scrappy: 1 };
+  var NAO_COPIA = { trace: 1, 'as-one-glastrier': 1, 'as-one-spectrier': 1, disguise: 1, 'ice-face': 1, 'wonder-guard': 1 };
+  var SOM = /\b(hyper voice|boomburst|bug buzz|snarl|echoed voice|uproar|disarming voice|clanging scales|overdrive|relic song|chatter|sparkling aria|torch song|psychic noise|alluring voice|round)\b/i;
+  var SOCO = /punch|hammer arm|meteor mash|uppercut|ice hammer|iron bash|wicked blow|surging strikes|rage fist|headlong rush/i;
+  var MORDIDA = /bite|fang|crunch|jaw lock|fishious/i, PULSO = /pulse|aura sphere/i;
+  var CORTE = /slash|cut|blade|razor|sword|scissor|cleave|stone axe|ceaseless edge|kowtow/i;
+  var BOMBA = /ball|bomb|bullet|focus blast|pollen puff|beak blast|octazooka|zap cannon|aura sphere/i;
+  function secundario(g) { return !!(g.ef && g.ef[1] < 100); }
 
   /* ---------- lutador ---------- */
   function zeroEst() { return { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }; }
-  function lutador(id, ids, item) {
-    var p = P[id], nv = nivelDe(p), st = statusDe(p.b, nv), gs = golpesDe(p, ids);
-    return { p: p, nv: nv, st: st, hpMax: st.hp, hp: st.hp, golpes: gs, pp: gs.map(function (g) { return g.pp || 10; }), est: zeroEst(),
-      item: item || null, preso: null, descansa: false, lento: 0 };
+  /* cfg (opcional): { nat: índice da nature, hab: posição da habilidade na lista do Pokémon } */
+  function lutador(id, ids, item, cfg) {
+    cfg = cfg || {};
+    var p = P[id], nv = nivelDe(p), gs = golpesDe(p, ids);
+    var nat = NATURES[cfg.nat] ? cfg.nat : natAuto(p, gs), hl = habsDe(p), hp = hl[cfg.hab] ? cfg.hab : habAuto(p);
+    var st = statusDe(p.b, nv, nat), h = hl[hp] ? hl[hp].slug : '';
+    return { p: p, nv: nv, nat: nat, st: st, hpMax: st.hp, hp: st.hp, golpes: gs, pp: gs.map(function (g) { return g.pp || 10; }), est: zeroEst(),
+      item: item || null, preso: null, descansa: false, turnos: 0, hab: h, habBase: h, habPos: hp, novo: false, flash: false, disfarce: false, usouEntrada: false };
   }
-  function novoLado(ids, mv, itens) { return { time: ids.map(function (id) { return lutador(id, mv && mv[id], itens && itens[id]); }), ativo: 0 }; }
+  /* extra: { [id]: { nat, hab } } */
+  function novoLado(ids, mv, itens, extra) { return { time: ids.map(function (id) { return lutador(id, mv && mv[id], itens && itens[id], extra && extra[id]); }), ativo: 0 }; }
   function ativo(l) { return l.time[l.ativo]; }
   function vivos(l) { return l.time.filter(function (m) { return m.hp > 0; }); }
 
@@ -106,19 +256,75 @@
   var NOME_ATR = { atk: 'Ataque', def: 'Defesa', spa: 'Atq. Esp.', spd: 'Def. Esp.', spe: 'Velocidade' };
   var CURTO_ATR = { atk: 'ATQ', def: 'DEF', spa: 'A.ESP', spd: 'D.ESP', spe: 'VEL' };
   function multEst(s) { return s >= 0 ? (2 + s) / 2 : 2 / (2 - s); }
-  function lentoAtivo(m) { return !!LENTO[m.p.esp] && m.lento < 5; }
-  /* crítico ignora as baixas de quem ataca e as subidas de quem defende */
-  function atributo(m, k, crit, atacando) {
-    var s = m.est ? m.est[k] : 0;
+  function lentoAtivo(m) { return hab(m) === 'slow-start' && m.turnos < 5; }
+  /* crítico ignora as baixas de quem ataca e as subidas de quem defende; Unaware do outro ignora todos os estágios */
+  var RUINA = { atk: 'tablets-of-ruin', spa: 'vessel-of-ruin', def: 'sword-of-ruin', spd: 'beads-of-ruin' };
+  function atributo(m, k, crit, atacando, outro) {
+    var s = m.est ? m.est[k] : 0, h = hab(m);
     if (crit && ((atacando && s < 0) || (!atacando && s > 0))) { s = 0; }
+    if (outro && hab(outro) === 'unaware') { s = 0; }
     var v = m.st[k] * multEst(s);
     if ((k === 'atk' || k === 'spe') && lentoAtivo(m)) { v *= 0.5; }
+    if (atacando) {
+      if (k === 'atk' && (h === 'huge-power' || h === 'pure-power')) { v *= 2; }
+      if (k === 'atk' && h === 'hustle') { v *= 1.5; }
+      if ((k === 'atk' && h === 'orichalcum-pulse') || (k === 'spa' && h === 'hadron-engine')) { v *= 4 / 3; }
+      if (h === 'defeatist' && m.hp * 2 < m.hpMax) { v *= 0.5; }
+    }
+    if (outro && RUINA[k] && hab(outro) === RUINA[k] && h !== RUINA[k]) { v *= 0.75; }
     return v;
   }
   function velocidade(m) { return atributo(m, 'spe'); }
   function mudarEst(m, k, d) { var antes = m.est[k]; m.est[k] = Math.max(-6, Math.min(6, antes + d)); return m.est[k] - antes; }
-  /* ao sair de campo, estágios, fúria e contadores voltam ao normal */
-  function sairDeCampo(m) { m.est = zeroEst(); m.preso = null; m.descansa = false; m.lento = 0; }
+  /* passos (P): o que aconteceu, pela ordem, para a batalha mostrar ({tipo:'hab'|'est'|'hp'|'txt', m, ...}) */
+  function anunciar(m, P) { P.push({ tipo: 'hab', m: m, nome: nomeHab(hab(m)) }); }
+  /* muda um atributo passando pelas habilidades; fonte = adversário que causou a mudança (null = o próprio) */
+  function alterar(m, k, n, fonte, P) {
+    var h = fonte && quebra(fonte) && !INQUEBRAVEL[hab(m)] ? '' : hab(m);
+    if (h === 'contrary') { n = -n; }
+    if (h === 'simple') { n *= 2; }
+    if (fonte && n < 0) {
+      if (SEM_BAIXAS[h] || (h === 'hyper-cutter' && k === 'atk') || (h === 'big-pecks' && k === 'def')) {
+        anunciar(m, P); P.push({ tipo: 'txt', txt: `${NOME_ATR[k]} de <b>${esc(m.p.nome)}</b> não baixou.` }); return;
+      }
+      if (h === 'mirror-armor') { anunciar(m, P); alterar(fonte, k, n, null, P); return; }
+    }
+    var dd = mudarEst(m, k, n);
+    P.push({ tipo: 'est', m: m, k: k, d: dd, pedido: n });
+    if (fonte && n < 0 && dd < 0 && (h === 'defiant' || h === 'competitive')) {
+      anunciar(m, P); var k2 = h === 'defiant' ? 'atk' : 'spa';
+      P.push({ tipo: 'est', m: m, k: k2, d: mudarEst(m, k2, 2), pedido: 2 });
+    }
+  }
+  /* perder ou ganhar HP fora dos golpes (nunca desmaia por isto) */
+  function mexerHp(m, x, txt, P) {
+    x = x < 0 ? -Math.min(-x, m.hp - 1) : Math.min(x, m.hpMax - m.hp);
+    if (!x) { return 0; }
+    m.hp += x; P.push({ tipo: 'hp', m: m, d: x, txt: txt.replace('{x}', Math.abs(x)) }); return x;
+  }
+  /* ao entrar em campo: Intimidate, Download, Intrepid Sword, Trace... */
+  function aoEntrar(m, foe, P) {
+    var h = hab(m);
+    if (m.hp <= 0) { return P; }
+    if (h === 'trace' && foe && foe.hp > 0 && hab(foe) && !NAO_COPIA[hab(foe)]) {
+      anunciar(m, P); m.hab = hab(foe); P.push({ tipo: 'txt', txt: `<b>${esc(m.p.nome)}</b> copiou ${esc(nomeHab(m.hab))}!` }); h = m.hab;
+    }
+    if (h === 'intimidate' && foe && foe.hp > 0) {
+      anunciar(m, P);
+      var hf = hab(foe);
+      if (SEM_INTIMIDAR[hf]) { anunciar(foe, P); P.push({ tipo: 'txt', txt: `<b>${esc(foe.p.nome)}</b> não se intimidou.` }); }
+      else if (hf === 'guard-dog') { anunciar(foe, P); alterar(foe, 'atk', 1, null, P); }
+      else { alterar(foe, 'atk', -1, m, P); }
+    }
+    if (h === 'download' && foe && foe.hp > 0) { anunciar(m, P); alterar(m, atributo(foe, 'def') < atributo(foe, 'spd') ? 'atk' : 'spa', 1, null, P); }
+    if ((h === 'intrepid-sword' || h === 'dauntless-shield') && !m.usouEntrada) { m.usouEntrada = true; anunciar(m, P); alterar(m, h === 'intrepid-sword' ? 'atk' : 'def', 1, null, P); }
+    return P;
+  }
+  /* ao sair de campo, estágios, fúria e contadores voltam ao normal; Regenerator recupera 1/3 */
+  function sairDeCampo(m, P) {
+    if (m.hp > 0 && hab(m) === 'regenerator') { mexerHp(m, Math.floor(m.hpMax / 3), `<b>${esc(m.p.nome)}</b> regenerou {x} HP.`, P || []); }
+    m.est = zeroEst(); m.preso = null; m.descansa = false; m.turnos = 0; m.flash = false; m.novo = true; m.hab = m.habBase || m.hab;
+  }
 
   /* ---------- Mega Evolução e Gigantamax: só quem leva o item, uma vez por time ---------- */
   function formasDe(p, tipo) {
@@ -149,7 +355,9 @@
   function aplicarForma(m, op) {
     var razao = m.hp / m.hpMax;
     // a Mega mantém os golpes escolhidos; o Gigantamax troca-os pelos golpes Max (HP ×1,5 durante 3 turnos)
-    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b, m.nv); m.hpMax = m.st.hp; m.golpesBase = m.golpes;
+    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b, m.nv, m.nat); m.hpMax = m.st.hp; m.golpesBase = m.golpes;
+    // a Mega ganha a habilidade da forma nova (ex.: Mega Charizard X fica com Tough Claws)
+    if (op.tipo === 'mega') { var hm = habsDe(op.p); if (hm.length) { m.hab = m.habBase = hm[0].slug; } }
     if (op.tipo === 'gmax') {
       m.hpMax = Math.round(m.hpMax * 1.5); m.gmax = 3; m.preso = null;
       m.golpes = m.golpesBase.map(function (g) { return { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0, pp: g.pp, max: true }; });
@@ -158,7 +366,7 @@
   }
   function desfazerGmax(m) {
     var razao = m.hp / m.hpMax, p = m.base;
-    m.p = p; m.st = statusDe(p.b, m.nv); m.hpMax = m.st.hp; m.golpes = m.golpesBase || golpesDe(p); m.golpesBase = null; m.gmax = 0; m.base = null; m.forma = null;
+    m.p = p; m.st = statusDe(p.b, m.nv, m.nat); m.hpMax = m.st.hp; m.golpes = m.golpesBase || golpesDe(p); m.golpesBase = null; m.gmax = 0; m.base = null; m.forma = null;
     m.hp = m.hp <= 0 ? 0 : Math.max(1, Math.round(razao * m.hpMax));
   }
   function rotuloForma(op) {
@@ -170,58 +378,209 @@
   /* ---------- dano ---------- */
   function efTotal(tipo, alvo) { return K.efTotal(tipo, alvo.t); }
   function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.pw; }
+  /* tipo do golpe depois das habilidades (Pixilate, Liquid Voice...) */
+  function tipoDe(a, g) {
+    if (g.semTipo || g.max) { return g.t; }
+    var h = hab(a);
+    if (PELE[h] && g.t === 'normal') { return PELE[h]; }
+    if (h === 'liquid-voice' && SOM.test(g.nome)) { return 'water'; }
+    return g.t;
+  }
+  function efetividade(a, d, g, t) {
+    if (g.semTipo) { return 1; }
+    var tipos = d.p.t;
+    if (hab(a) === 'scrappy' && (t === 'normal' || t === 'fighting')) { tipos = tipos.filter(function (x) { return x !== 'ghost'; }); }
+    return K.efTotal(t, tipos);
+  }
+  function stabDe(a, g, t) {
+    if (g.semTipo) { return 1; }
+    var h = hab(a);
+    if (a.p.t.indexOf(t) < 0 && h !== 'protean' && h !== 'libero') { return 1; }
+    return h === 'adaptability' ? 2 : 1.5;
+  }
+  function prioGolpe(m, g) {
+    var h = hab(m), t = tipoDe(m, g);
+    return (g.pr || 0) + (h === 'gale-wings' && t === 'flying' && m.hp === m.hpMax ? 1 : 0) + (h === 'triage' && g.dr > 0 ? 3 : 0);
+  }
+  /* imunidades por habilidade: devolve a habilidade que bloqueou */
+  function bloqueio(a, d, g, t, e) {
+    var h = habAlvo(a, d);
+    if (!h || g.luta) { return ''; }
+    if (ABSORVE[h] === t) { return h; }
+    if (h === 'wonder-guard' && !g.semTipo && e < 2) { return h; }
+    if (h === 'bulletproof' && BOMBA.test(g.nome)) { return h; }
+    if (h === 'soundproof' && SOM.test(g.nome)) { return h; }
+    if ((h === 'dazzling' || h === 'queenly-majesty' || h === 'armor-tail') && prioGolpe(a, g) > 0) { return h; }
+    return '';
+  }
+  /* multiplicadores das habilidades de quem ataca e de quem defende */
+  function multHab(a, d, g, t, e, crit) {
+    var h = hab(a), hd = habAlvo(a, d), m = 1;
+    if (h === 'technician' && poderDe(a, g) <= 60) { m *= 1.5; }
+    if (PELE[h] && g.t === 'normal' && !g.max) { m *= 1.2; }
+    if (h === 'sheer-force' && secundario(g)) { m *= 1.3; }
+    if (h === 'tough-claws' && g.c === 'F') { m *= 1.3; }
+    if (h === 'iron-fist' && SOCO.test(g.nome)) { m *= 1.2; }
+    if (h === 'strong-jaw' && MORDIDA.test(g.nome)) { m *= 1.5; }
+    if (h === 'mega-launcher' && PULSO.test(g.nome)) { m *= 1.5; }
+    if (h === 'sharpness' && CORTE.test(g.nome)) { m *= 1.5; }
+    if (h === 'reckless' && g.dr < 0) { m *= 1.2; }
+    if (h === 'punk-rock' && SOM.test(g.nome)) { m *= 1.3; }
+    if (APERTO[h] === t && a.hp * 3 <= a.hpMax) { m *= 1.5; }
+    if (TIPO_FORTE[h] && TIPO_FORTE[h][0] === t) { m *= TIPO_FORTE[h][1]; }
+    if (h === 'flash-fire' && a.flash && t === 'fire') { m *= 1.5; }
+    if (h === 'tinted-lens' && e > 0 && e < 1) { m *= 2; }
+    if (h === 'neuroforce' && e >= 2) { m *= 1.25; }
+    if (h === 'parental-bond' && !(g.hmax > 1) && !g.luta) { m *= 1.25; }
+    if (h === 'sniper' && crit) { m *= 1.5; }
+    if ((t === 'fairy' && (h === 'fairy-aura' || hab(d) === 'fairy-aura')) || (t === 'dark' && (h === 'dark-aura' || hab(d) === 'dark-aura'))) { m *= 4 / 3; }
+    if (hd === 'thick-fat' && (t === 'fire' || t === 'ice')) { m *= 0.5; }
+    if ((hd === 'heatproof' || hd === 'water-bubble') && t === 'fire') { m *= 0.5; }
+    if (hd === 'dry-skin' && t === 'fire') { m *= 1.25; }
+    if (hd === 'purifying-salt' && t === 'ghost') { m *= 0.5; }
+    if (hd === 'fluffy') { m *= (g.c === 'F' ? 0.5 : 1) * (t === 'fire' ? 2 : 1); }
+    if (hd === 'ice-scales' && g.c === 'E') { m *= 0.5; }
+    if (hd === 'fur-coat' && g.c === 'F') { m *= 0.5; }
+    if (hd === 'punk-rock' && SOM.test(g.nome)) { m *= 0.5; }
+    if ((hd === 'multiscale' || hd === 'shadow-shield') && d.hp === d.hpMax) { m *= 0.5; }
+    if ((hd === 'filter' || hd === 'solid-rock' || hd === 'prism-armor') && e >= 2) { m *= 0.75; }
+    return m;
+  }
   function danoBase(a, d, g, crit) {
-    var A = atributo(a, g.c === 'F' ? 'atk' : 'spa', crit, true), Df = atributo(d, g.c === 'F' ? 'def' : 'spd', crit, false);
+    var A = atributo(a, g.c === 'F' ? 'atk' : 'spa', crit, true, d), Df = atributo(d, g.c === 'F' ? 'def' : 'spd', crit, false, a);
     return Math.floor(Math.floor(Math.floor(2 * a.nv / 5 + 2) * poderDe(a, g) * A / Df) / 50) + 2;
   }
+  function precisaoDe(a, d, g) {
+    if (g.ac === 0 || hab(a) === 'no-guard' || hab(d) === 'no-guard') { return 0; }
+    var h = hab(a), ac = g.ac;
+    if (h === 'compound-eyes') { ac *= 1.3; }
+    if (h === 'victory-star') { ac *= 1.1; }
+    if (h === 'hustle' && g.c === 'F') { ac *= 0.8; }
+    return ac;
+  }
+  var CHANCE_CRIT = [1 / 24, 1 / 8, 1 / 2];
   function calcular(a, d, g) {
-    var e = g.semTipo ? 1 : efTotal(g.t, d.p);
-    if (!(g.ac === 0 || rng() * 100 < g.ac)) { return { erro: true, dano: 0, ef: e, crit: false, acertos: 0 }; }
-    var stab = !g.semTipo && a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
-    var crit = g.ca === 2 || rng() < (g.ca === 1 ? 1 / 8 : 1 / 24), variacao = 0.85 + rng() * 0.15;
+    var t = tipoDe(a, g), e = efetividade(a, d, g, t), bloq = e === 0 ? '' : bloqueio(a, d, g, t, e);
+    if (bloq) { return { erro: false, dano: 0, ef: 0, crit: false, acertos: 0, t: t, bloq: bloq }; }
+    var ac = precisaoDe(a, d, g);
+    if (!(ac === 0 || rng() * 100 < ac)) { return { erro: true, dano: 0, ef: e, crit: false, acertos: 0, t: t }; }
+    var stab = stabDe(a, g, t), nc = Math.min(2, (g.ca || 0) + (hab(a) === 'super-luck' ? 1 : 0));
+    var crit = g.ca === 2 || rng() < CHANCE_CRIT[nc], variacao = 0.85 + rng() * 0.15;
+    var hd = habAlvo(a, d);
+    if (hd === 'battle-armor' || hd === 'shell-armor') { crit = false; }
     var acertos = 1;
     if (g.hmax > 1) {
       var r = rng();
-      acertos = g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
+      acertos = hab(a) === 'skill-link' ? g.hmax : g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
     }
-    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao)) * acertos;
-    return { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos };
+    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao * multHab(a, d, g, t, e, crit))) * acertos;
+    var res = { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos, t: t };
+    // Disguise / Ice Face: o primeiro golpe não faz (quase) dano; Sturdy: aguenta com 1 HP
+    if (dano > 0 && !d.disfarce && (hd === 'disguise' || (hd === 'ice-face' && g.c === 'F'))) {
+      res.dano = hd === 'disguise' ? Math.min(d.hp, Math.max(1, Math.floor(d.hpMax / 8))) : 0; res.disfarce = hd;
+    } else if (hd === 'sturdy' && d.hp === d.hpMax && dano >= d.hp) { res.dano = d.hp - 1; res.aguentou = true; }
+    return res;
   }
   function esperado(a, d, g) {
-    var stab = !g.semTipo && a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1, critMedio = g.ca === 2 ? 1.5 : g.ca === 1 ? 1.0625 : 1.02;
-    return danoBase(a, d, g, false) * stab * (g.semTipo ? 1 : efTotal(g.t, d.p)) * (g.ac === 0 ? 1 : g.ac / 100) * acertosMedios(g) * critMedio * 0.925;
+    var t = tipoDe(a, g), e = efetividade(a, d, g, t);
+    if (!e || bloqueio(a, d, g, t, e)) { return 0; }
+    var h = hab(a), nc = Math.min(2, (g.ca || 0) + (h === 'super-luck' ? 1 : 0)), hd = habAlvo(a, d);
+    var pc = hd === 'battle-armor' || hd === 'shell-armor' ? 0 : g.ca === 2 ? 1 : CHANCE_CRIT[nc], critMedio = 1 + pc * (h === 'sniper' ? 1.25 : 0.5);
+    var ac = precisaoDe(a, d, g), hits = g.hmax > 1 && h === 'skill-link' ? g.hmax : acertosMedios(g);
+    return danoBase(a, d, g, false) * stabDe(a, g, t) * e * (ac === 0 ? 1 : Math.min(1, ac / 100)) * hits * critMedio * 0.925 * multHab(a, d, g, t, e, false);
   }
-  /* dreno (cura quem atacou) e recuo (fere quem atacou, sem o derrubar) */
-  function efeitoDreno(a, g, causado) {
-    if (!g.dr || causado <= 0 || a.hp <= 0) { return 0; }
+  /* dreno (cura quem atacou; Liquid Ooze fere) e recuo (fere quem atacou, sem o derrubar) */
+  function efeitoDreno(a, d, g, causado, P) {
+    if (!g.dr || causado <= 0 || a.hp <= 0) { return; }
     var x = Math.max(1, Math.floor(causado * Math.abs(g.dr) / 100));
-    if (g.dr > 0) { x = Math.min(x, a.hpMax - a.hp); a.hp += x; return x; }
-    x = Math.min(x, a.hp - 1); a.hp -= x; return -x;
+    if (g.dr > 0) {
+      if (hab(d) === 'liquid-ooze') { anunciar(d, P); mexerHp(a, -x, `<b>${esc(a.p.nome)}</b> absorveu lodo e perdeu {x} HP.`, P); return; }
+      mexerHp(a, x, `<b>${esc(a.p.nome)}</b> recuperou {x} HP.`, P); return;
+    }
+    if (hab(a) === 'rock-head' || hab(a) === 'magic-guard') { return; }
+    mexerHp(a, -x, `<b>${esc(a.p.nome)}</b> sofreu {x} de recuo.`, P);
   }
 
   /* ---------- usar um golpe: regras comuns à batalha e à simulação ---------- */
-  /* decide o golpe que sai mesmo (preguiça, fúria, PP) e gasta o PP */
-  function golpeEfetivo(a, idx) {
-    if (PREGUICA[a.p.esp] && a.descansa) { a.descansa = false; return { descansa: true }; }
-    if (PREGUICA[a.p.esp]) { a.descansa = true; }
+  /* decide o golpe que sai mesmo (preguiça, fúria, PP) e gasta o PP (Pressure do adversário gasta 2) */
+  function golpeEfetivo(a, idx, d) {
+    if (hab(a) === 'truant' && a.descansa) { a.descansa = false; return { descansa: true }; }
+    if (hab(a) === 'truant') { a.descansa = true; }
     if (a.preso) { idx = a.preso.idx; }
     if (!a.pp.some(function (x) { return x > 0; })) { return { g: LUTA, idx: -1 }; }
     if (!(a.pp[idx] > 0)) { idx = a.pp.findIndex(function (x) { return x > 0; }); }
-    a.pp[idx]--;
+    a.pp[idx] = Math.max(0, a.pp[idx] - (d && hab(d) === 'pressure' ? 2 : 1));
     return { g: a.golpes[idx], idx: idx };
   }
-  /* depois do golpe: dreno/recuo, Struggle, efeitos nos atributos e fúria; devolve o que aconteceu */
-  function efeitosDepois(a, d, g, r, causado, idx) {
-    var ev = { dreno: 0, est: [] };
-    if (g.luta) {
-      var rec = Math.min(Math.max(1, Math.floor(a.hpMax / 4)), a.hp - 1);
-      if (rec > 0) { a.hp -= rec; ev.dreno = -rec; }
-    } else { ev.dreno = efeitoDreno(a, g, causado); }
-    if (g.ef && !r.erro && r.ef !== 0) {
-      var alvo = g.ef[0] === 'u' ? a : d;
-      if (alvo.hp > 0 && (g.ef[1] >= 100 || rng() * 100 < g.ef[1])) {
-        g.ef[2].forEach(function (x) { ev.est.push({ quem: alvo === a ? 'a' : 'd', k: x[0], d: mudarEst(alvo, x[0], x[1]), pedido: x[1] }); });
+  /* o alvo absorveu o golpe com a habilidade */
+  function absorver(d, slug, P) {
+    anunciar(d, P);
+    var cura = function () { if (!mexerHp(d, Math.floor(d.hpMax / 4), `<b>${esc(d.p.nome)}</b> recuperou {x} HP.`, P)) { P.push({ tipo: 'txt', txt: `Não afeta <b>${esc(d.p.nome)}</b>.` }); } };
+    switch (slug) {
+      case 'flash-fire': d.flash = true; P.push({ tipo: 'txt', txt: `O Fogo de <b>${esc(d.p.nome)}</b> ficou mais forte!` }); break;
+      case 'water-absorb': case 'volt-absorb': case 'dry-skin': case 'earth-eater': cura(); break;
+      case 'lightning-rod': case 'storm-drain': alterar(d, 'spa', 1, null, P); break;
+      case 'motor-drive': alterar(d, 'spe', 1, null, P); break;
+      case 'sap-sipper': alterar(d, 'atk', 1, null, P); break;
+      case 'well-baked-body': alterar(d, 'def', 2, null, P); break;
+      default: P.push({ tipo: 'txt', txt: `Não afeta <b>${esc(d.p.nome)}</b>.` });
+    }
+  }
+  /* reações de quem foi atingido (Rough Skin, Justified, Stamina...) */
+  function reacoes(a, d, g, r, causado, P) {
+    var hd = hab(d), t = r.t, antes = d.hp + causado, meio = d.hpMax / 2;
+    if (d.hp > 0) {
+      if (hd === 'justified' && t === 'dark') { anunciar(d, P); alterar(d, 'atk', 1, null, P); }
+      if (hd === 'weak-armor' && g.c === 'F') { anunciar(d, P); alterar(d, 'def', -1, null, P); alterar(d, 'spe', 2, null, P); }
+      if (hd === 'stamina') { anunciar(d, P); alterar(d, 'def', 1, null, P); }
+      if (hd === 'rattled' && (t === 'bug' || t === 'ghost' || t === 'dark')) { anunciar(d, P); alterar(d, 'spe', 1, null, P); }
+      if (hd === 'steam-engine' && (t === 'fire' || t === 'water')) { anunciar(d, P); alterar(d, 'spe', 6, null, P); }
+      if (hd === 'thermal-exchange' && t === 'fire') { anunciar(d, P); alterar(d, 'atk', 1, null, P); }
+      if (antes > meio && d.hp <= meio) {
+        if (hd === 'berserk') { anunciar(d, P); alterar(d, 'spa', 1, null, P); }
+        if (hd === 'anger-shell') { anunciar(d, P); ['atk', 'spa', 'spe'].forEach(function (k) { alterar(d, k, 1, null, P); }); alterar(d, 'def', -1, null, P); alterar(d, 'spd', -1, null, P); }
       }
+      if (hd === 'anger-point' && r.crit) { anunciar(d, P); alterar(d, 'atk', 12, null, P); }
+      if (hd === 'cotton-down' && a.hp > 0) { anunciar(d, P); alterar(a, 'spe', -1, d, P); }
+    }
+    if (a.hp > 0 && hab(a) !== 'magic-guard') {
+      if (g.c === 'F' && (hd === 'rough-skin' || hd === 'iron-barbs')) { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 8)), `<b>${esc(a.p.nome)}</b> magoou-se e perdeu {x} HP.`, P); }
+      if (d.hp <= 0 && g.c === 'F' && hd === 'aftermath') { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 4)), `<b>${esc(a.p.nome)}</b> perdeu {x} HP.`, P); }
+      if (d.hp <= 0 && hd === 'innards-out') { anunciar(d, P); mexerHp(a, -causado, `<b>${esc(a.p.nome)}</b> perdeu {x} HP.`, P); }
+    }
+    if (d.hp > 0 && a.hp > 0 && g.c === 'F' && (hd === 'gooey' || hd === 'tangling-hair')) { anunciar(d, P); alterar(a, 'spe', -1, d, P); }
+  }
+  /* derrubou um adversário: Moxie, Beast Boost... */
+  function aoDerrubar(a, P) {
+    var h = hab(a);
+    if (a.hp <= 0) { return; }
+    if (h === 'moxie' || h === 'chilling-neigh' || h === 'as-one-glastrier') { anunciar(a, P); alterar(a, 'atk', 1, null, P); }
+    if (h === 'grim-neigh' || h === 'as-one-spectrier') { anunciar(a, P); alterar(a, 'spa', 1, null, P); }
+    if (h === 'beast-boost') {
+      var k = ['atk', 'def', 'spa', 'spd', 'spe'].reduce(function (x, y) { return a.st[y] > a.st[x] ? y : x; }, 'atk');
+      anunciar(a, P); alterar(a, k, 1, null, P);
+    }
+  }
+  /* depois do golpe: dreno/recuo, Struggle, efeitos nos atributos, habilidades e fúria; devolve os passos */
+  function efeitosDepois(a, d, g, r, causado, idx) {
+    var ev = { passos: [] }, P = ev.passos;
+    if (r.bloq) { absorver(d, r.bloq, P); }
+    else if (!r.erro && r.ef !== 0) {
+      if (r.disfarce) { d.disfarce = true; anunciar(d, P); P.push({ tipo: 'txt', txt: `O disfarce de <b>${esc(d.p.nome)}</b> protegeu-o!` }); }
+      if (r.aguentou) { anunciar(d, P); P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> aguentou o golpe!` }); }
+      if (g.luta) {
+        if (hab(a) !== 'magic-guard') { mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 4)), `<b>${esc(a.p.nome)}</b> sofreu {x} de recuo.`, P); }
+      } else { efeitoDreno(a, d, g, causado, P); }
+      if (g.ef && !(secundario(g) && hab(a) === 'sheer-force')) {
+        var alvo = g.ef[0] === 'u' ? a : d;
+        var protegido = alvo === d && secundario(g) && habAlvo(a, d) === 'shield-dust';
+        var chance = g.ef[1] * (hab(a) === 'serene-grace' ? 2 : 1);
+        if (alvo.hp > 0 && !protegido && (g.ef[1] >= 100 || rng() * 100 < chance)) {
+          g.ef[2].forEach(function (x) { alterar(alvo, x[0], x[1], alvo === d ? a : null, P); });
+        }
+      }
+      if (causado > 0) { reacoes(a, d, g, r, causado, P); }
+      if (d.hp <= 0) { aoDerrubar(a, P); }
     }
     if (g.esp === 'furia') {
       if (r.erro || r.ef === 0) { a.preso = null; }
@@ -235,17 +594,38 @@
     if (m.hp <= 0 || m.base || m.gmax) { return null; }
     var nova = evolucaoDe(m.p); if (!nova) { return null; }
     var razao = m.hp / m.hpMax, antes = m.p;
+    var lv = habsDe(antes), hv = lv[m.habPos] || { slug: m.habBase, oculta: false }, normais = lv.filter(function (h) { return !h.oculta; });
     m.nv = Math.round((m.nv + nivelDe(nova)) / 2);
-    m.p = nova; m.st = statusDe(nova.b, m.nv); m.hpMax = m.st.hp; m.hp = Math.max(1, Math.round(razao * m.hpMax));
+    m.p = nova; m.st = statusDe(nova.b, m.nv, m.nat); m.hpMax = m.st.hp; m.hp = Math.max(1, Math.round(razao * m.hpMax));
+    var copiada = m.hab !== m.habBase;
+    m.habBase = habEvolucao(nova, { slug: m.habBase, oculta: hv.oculta, pos: Math.max(0, normais.indexOf(hv)) }) || m.habBase;
+    m.habPos = Math.max(0, habsDe(nova).findIndex(function (h) { return h.slug === m.habBase; }));
+    if (!copiada) { m.hab = m.habBase; }
     return antes;
   }
-  /* fim do turno: o Início Lento conta os turnos em campo */
-  function fimTurnoLado(l) { var m = ativo(l); if (m.hp > 0 && LENTO[m.p.esp] && m.lento < 5) { m.lento++; } }
+  /* fim do turno: conta os turnos em campo (Slow Start), Speed Boost e Moody */
+  function fimTurnoLado(l) {
+    var m = ativo(l), P = [];
+    if (m.hp <= 0) { return P; }
+    m.turnos++;
+    var h = hab(m);
+    if (h === 'speed-boost' && !m.novo && m.est.spe < 6) { anunciar(m, P); alterar(m, 'spe', 1, null, P); }
+    if (h === 'moody') {
+      var ks = ['atk', 'def', 'spa', 'spd', 'spe'], sobe = ks.filter(function (k) { return m.est[k] < 6; });
+      if (sobe.length) {
+        var k1 = sobe[Math.floor(rng() * sobe.length)], desce = ks.filter(function (k) { return k !== k1 && m.est[k] > -6; });
+        anunciar(m, P); alterar(m, k1, 2, null, P);
+        if (desce.length) { alterar(m, desce[Math.floor(rng() * desce.length)], -1, null, P); }
+      }
+    }
+    m.novo = false;
+    return P;
+  }
   function prioridade(m, ac) {
     if (ac.tipo === 'troca') { return 10; }
     if (!m.pp.some(function (x) { return x > 0; })) { return 0; }
     var g = m.golpes[m.preso ? m.preso.idx : ac.idx];
-    return g ? g.pr : 0;
+    return g ? prioGolpe(m, g) : 0;
   }
 
   /* ---------- IA ---------- */
@@ -306,17 +686,18 @@
   }
 
   /* ---------- simulação rápida (previsão, Simular ×1000 e calibração dos níveis) ---------- */
-  function simular(idsJ, idsO, mvJ, mvO) {
-    var B = { j: novoLado(idsJ, mvJ || S.mv.j), o: novoLado(idsO, mvO || S.mv.o) }, turnos = 0;
+  function simular(idsJ, idsO, mvJ, mvO, exJ, exO) {
+    var B = { j: novoLado(idsJ, mvJ || S.mv.j, null, exJ || (mvJ ? null : extrasDo('j'))), o: novoLado(idsO, mvO || S.mv.o, null, exO || (mvO ? null : extrasDo('o'))) }, turnos = 0;
+    aoEntrar(ativo(B.j), ativo(B.o), []); aoEntrar(ativo(B.o), ativo(B.j), []);
     while (vivos(B.j).length && vivos(B.o).length && turnos < 300) {
       turnos++;
       var acoes = ordem(B, iaAcao(B.j, B.o), iaAcao(B.o, B.j));
       for (var k = 0; k < acoes.length; k++) {
         var lado = acoes[k].lado, foe = lado === 'j' ? 'o' : 'j', ac = acoes[k].a;
-        if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; continue; }
+        if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; aoEntrar(ativo(B[lado]), ativo(B[foe]), []); continue; }
         var a = ativo(B[lado]), d = ativo(B[foe]);
         if (a.hp <= 0) { continue; }
-        var uso = golpeEfetivo(a, ac.idx);
+        var uso = golpeEfetivo(a, ac.idx, d);
         if (uso.descansa) { continue; }
         var r = calcular(a, d, uso.g), antes = d.hp;
         d.hp = Math.max(0, d.hp - r.dano);
@@ -324,7 +705,7 @@
         if (d.hp <= 0) {
           evoluir(a);
           var rs = iaMelhorReserva(B[foe], a);
-          if (rs >= 0) { sairDeCampo(d); B[foe].ativo = rs; }
+          if (rs >= 0) { sairDeCampo(d); B[foe].ativo = rs; aoEntrar(ativo(B[foe]), a, []); }
           break;
         }
       }
@@ -342,12 +723,14 @@
   /* fotografia da batalha local (só entre turnos): Pokémon por id, com HP, forma e golpes */
   function fotoLutador(m) {
     return { pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
-      nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, lento: m.lento };
+      nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, turnos: m.turnos,
+      nat: m.nat, hab: m.hab, habBase: m.habBase, habPos: m.habPos, novo: m.novo, flash: m.flash, disfarce: m.disfarce, usouEntrada: m.usouEntrada };
   }
   function lutadorDaFoto(f) {
-    var p = P[f.pid]; if (!p || !f.nv || !f.pp) { return null; }
-    return { p: p, nv: f.nv, st: statusDe(p.b, f.nv), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
-      pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, lento: f.lento || 0 };
+    var p = P[f.pid]; if (!p || !f.nv || !f.pp || f.nat == null || f.hab == null) { return null; }
+    return { p: p, nv: f.nv, nat: f.nat, st: statusDe(p.b, f.nv, f.nat), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
+      pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, turnos: f.turnos || 0,
+      hab: f.hab, habBase: f.habBase || f.hab, habPos: f.habPos || 0, novo: !!f.novo, flash: !!f.flash, disfarce: !!f.disfarce, usouEntrada: !!f.usouEntrada };
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
@@ -382,6 +765,14 @@
   }
   if (!S.mv) { S.mv = { j: {}, o: {} }; }
   if (!S.itens) { S.itens = { j: {}, o: {} }; }
+  if (!S.nat) { S.nat = { j: {}, o: {} }; }
+  if (!S.hab) { S.hab = { j: {}, o: {} }; }
+  /* nature e habilidade escolhidas no editor: { [id]: { nat, hab } } (o que não foi escolhido fica automático) */
+  function extrasDo(l) {
+    var out = {};
+    S.time[l].forEach(function (id) { var n = S.nat[l][id], h = S.hab[l][id]; if (n != null || h != null) { out[id] = { nat: n, hab: h }; } });
+    return out;
+  }
   var NET = window.PKOnline;
   function emOnline() { return !!(S.B && S.B.online); }
   function $(id) { return document.getElementById(id); }
@@ -396,9 +787,16 @@
     var p = P[id];
     return `<div class='sl sl-cheio' style='--c:${corTipo(p.t[0])}'>
       <div class='sl-arte'>${K.img([K.URL.arte(id), K.URL.home(id)])}</div>
-      <div class='sl-info'><b title='${esc(p.nome)}'>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Nv. ${nivelDe(p)} · base ${p.total}</span></div>
-        ${itemHtml(l, p)}<div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>✎ Golpes</em>${S.mv[l][id] ? '' : '<small>auto</small>'}</div>
+      <div class='sl-info'><b title='${esc(p.nome)}'>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span class='sl-nv'>Nv. ${nivelDe(p)} · ${resumoNatHab(l, id)}</span></div>
+        ${itemHtml(l, p)}<div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes, nature e habilidade'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>✎ Editar</em>${S.mv[l][id] || S.nat[l][id] != null || S.hab[l][id] != null ? '' : '<small>auto</small>'}</div>
       <i data-acao='tirar' data-lado='${l}' data-i='${i}'>×</i></div>`;
+  }
+  /* nature e habilidade em vigor para um Pokémon do time (escolhidas ou automáticas) */
+  function natEm(l, id) { var n = S.nat[l][id]; return NATURES[n] ? n : natAuto(P[id], golpesDe(P[id], S.mv[l][id])); }
+  function habEm(l, id) { var hl = habsDe(P[id]), h = S.hab[l][id]; return hl[h] ? hl[h] : hl[habAuto(P[id])]; }
+  function resumoNatHab(l, id) {
+    var n = natEm(l, id), c = classeNat(n, P[id], golpesDe(P[id], S.mv[l][id])), h = habEm(l, id);
+    return `<i class='nat-pt ${c}'></i>${NATURES[n].nome}${h ? ' · ' + esc(h.nome) : ''}`;
   }
   /* botão do item: só para quem tem (ou terá ao evoluir) Mega ou Gigantamax; um item por time */
   function itemHtml(l, p) {
@@ -455,8 +853,8 @@
   }
   function previaHtml() {
     var cheio = S.time.j.length === tamanhoTime() && S.time.o.length === tamanhoTime();
-    if (!cheio) { return `<span class='pv-dica'>Clique num lado e escolha os Pokémon na grade · nível 50 · golpes definidos pelos tipos</span>`; }
-    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',') + ':' + JSON.stringify(S.mv) + JSON.stringify(S.itens);
+    if (!cheio) { return `<span class='pv-dica'>Clique num lado e escolha os Pokémon na grade · níveis equilibrados · toca em ✎ Editar para golpes, nature e habilidade</span>`; }
+    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',') + ':' + JSON.stringify(S.mv) + JSON.stringify(S.itens) + JSON.stringify(S.nat) + JSON.stringify(S.hab);
     if (!S.previa || S.previa.chave !== chave) { S.previa = rodarSimulacoes(300); S.previa.chave = chave; }
     var pj = S.previa.j;
     return `<div class='pv'><span class='pv-tit'>PREVISÃO</span>
@@ -534,7 +932,7 @@
   function rodapeOnline() {
     var ligado = ligadoOuAusente(), cheio = S.time.j.length === tamanhoTime();
     var dica = !ligado ? 'Cria uma sala ou entra com o código de um amigo' :
-      !cheio ? 'Monta o teu time e carrega em PRONTO · nível 50 · golpes definidos pelos tipos' :
+      !cheio ? 'Monta o teu time e carrega em PRONTO · níveis equilibrados · toca em ✎ Editar para golpes, nature e habilidade' :
       S.on.pronto ? (S.on.opPronto ? 'A começar...' : 'À espera que o adversário fique pronto...') : 'Time completo! Carrega em PRONTO';
     return `<span class='pv-dica'>${dica}</span>
       <div class='bt bt-go${ligado && cheio ? '' : ' off'}${S.on.pronto ? ' pronto' : ''}' data-acao='pronto'>${S.on.pronto ? '✓ PRONTO · cancelar' : '⚔ PRONTO'}</div>`;
@@ -584,11 +982,20 @@
     var cats = [['', 'Todos'], ['F', 'Físicos'], ['E', 'Especiais']].map(function (c) {
       return `<span class='gc${S.ge.cat === c[0] ? ' on' : ''}' data-acao='geCat' data-c='${c[0]}'>${c[1]}</span>`;
     }).join('');
-    return `<div class='ge'><div class='ge-box' style='--c:${corTipo(p.t[0])}'>
-      <div class='ge-topo'><div class='ge-arte'>${K.img([K.URL.home(p.id), K.URL.sprite(p.id)])}</div>
+    var aba = S.ge.aba === 'nat';
+    var abas = `<div class='ge-abas'><span class='${aba ? '' : 'on'}' data-acao='geAba' data-a='golpes'>⚔ Golpes</span><span class='${aba ? 'on' : ''}' data-acao='geAba' data-a='nat'>✦ Nature e habilidade</span></div>`;
+    var topo = `<div class='ge-topo'><div class='ge-arte'>${K.img([K.URL.home(p.id), K.URL.sprite(p.id)])}</div>
         <div class='ge-tit'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div>
-        <span>Ataque ${p.b.atk} · Atq. Esp. ${p.b.spa} · ${todos.length} golpes de dano que aprende</span></div>
-        <div class='bt bt-sec ge-x' data-acao='geFechar'>✕</div></div>
+        <span>Nv. ${nivelDe(p)} · Ataque ${p.b.atk} · Atq. Esp. ${p.b.spa} · ${todos.length} golpes de dano</span></div>
+        ${abas}<div class='bt bt-sec ge-x' data-acao='geFechar'>✕</div></div>`;
+    if (aba) {
+      return `<div class='ge'><div class='ge-box' style='--c:${corTipo(p.t[0])}'>${topo}${natHabHtml(p)}
+      <div class='ge-rodape'><span class='pv-dica'>Verde = benéfica para este Pokémon · cinzento = neutra · vermelho = prejudicial</span>
+        <div class='bt bt-sec' data-acao='geNatAuto'>🎲 Escolha automática</div>
+        <div class='bt bt-go${S.ge.ids.length ? '' : ' off'}' data-acao='geOk'>✓ Concluir</div></div>
+    </div></div>`;
+    }
+    return `<div class='ge'><div class='ge-box' style='--c:${corTipo(p.t[0])}'>${topo}
       <div class='ge-sls'>${slots}</div>
       <div class='ge-filtros'><input id='ar-ge-busca' class='busca' placeholder='🔍  Procurar golpe...' value='${esc(S.ge.busca)}'/><div class='gens'>${cats}</div></div>
       <div class='tcs ge-tipos'>${chips}</div>
@@ -598,6 +1005,38 @@
         <div class='bt bt-sec' data-acao='geAuto'>🎲 Escolha automática</div>
         <div class='bt bt-go${S.ge.ids.length ? '' : ' off'}' data-acao='geOk'>✓ Concluir</div></div>
     </div></div>`;
+  }
+  function natHabHtml(p) {
+    var gs = S.ge.ids.map(function (i) { return GR[i]; }).filter(Boolean);
+    if (!gs.length) { gs = golpesDe(p); }
+    var auto = S.ge.nat == null, n = auto ? natAuto(p, gs) : S.ge.nat, nv = nivelDe(p);
+    var cab = `<span></span>` + ORDEM_NAT.map(function (k) { return `<span class='gn-cab'>▼ ${CURTO_ATR[k]}</span>`; }).join('');
+    var linhas = ORDEM_NAT.map(function (ks, r) {
+      return `<span class='gn-cab gn-lin'>▲ ${CURTO_ATR[ks]}</span>` + ORDEM_NAT.map(function (kd, c) {
+        var i = r * 5 + c;
+        return `<div class='gn-c ${classeNat(i, p, gs)}${i === n ? ' on' : ''}' data-acao='geNat' data-n='${i}'>${NATURES[i].nome}</div>`;
+      }).join('');
+    }).join('');
+    var stN = statusDe(p.b, nv, n), st0 = statusDe(p.b, nv, 0);
+    var stats = [['hp', 'Vida'], ['atk', 'Ataque'], ['def', 'Defesa'], ['spa', 'Atq. Esp.'], ['spd', 'Def. Esp.'], ['spe', 'Velocidade']].map(function (x) {
+      var k = x[0], seta = NATURES[n].sobe === k ? "<i class='nat-up'>▲</i>" : NATURES[n].desce === k ? "<i class='nat-dn'>▼</i>" : '<i></i>';
+      var dif = stN[k] - st0[k];
+      return `<div class='gn-st'><span>${x[1]}</span><em>${p.b[k]}</em><b class='${dif > 0 ? 'up' : dif < 0 ? 'dn' : ''}'>${stN[k]}</b>${seta}</div>`;
+    }).join('');
+    var cls = classeNat(n, p, gs), hl = habsDe(p), hAt = S.ge.hab != null && hl[S.ge.hab] ? S.ge.hab : habAuto(p);
+    var habs = hl.length ? hl.map(function (h, i) {
+      var info = HAB_INFO[h.slug];
+      return `<div class='gh-c${i === hAt ? ' on' : ''}${info ? '' : ' sem'}' data-acao='geHab' data-h='${i}'><b>${esc(h.nome)}${h.oculta ? ' <i>oculta</i>' : ''}</b>
+        <span>${info ? esc(info[1]) : 'Sem efeito na Arena (depende de clima, estados ou terrenos, que aqui não existem)'}</span></div>`;
+    }).join('') : `<div class='cd-mais'>Sem habilidades conhecidas</div>`;
+    return `<div class='gn'>
+      <div class='gn-esq'><div class='gn-tit'>NATURE <span>a linha sobe 10% · a coluna desce 10%</span></div><div class='gn-grade'>${cab}${linhas}</div></div>
+      <div class='gn-dir'><div class='gn-tit'>ATRIBUTOS NO NÍVEL ${nv}</div>
+        <div class='gn-nome'><b>${NATURES[n].nome}</b><span class='gn-rot ${cls}'>${ROTULO_NAT[cls]}</span>${auto ? '<small>automática</small>' : ''}</div>
+        <div class='gn-sts'><div class='gn-st gn-st-cab'><span></span><em>base</em><b>final</b><i></i></div>${stats}</div></div>
+    </div>
+    <div class='gn-tit'>HABILIDADE ${S.ge.hab == null ? '<span>automática: a mais útil na Arena</span>' : ''}</div>
+    <div class='gh'>${habs}</div>`;
   }
   function geAtualizar() {
     var l = $('ar-ge-lista'), topo = l ? l.scrollTop : 0;
@@ -623,8 +1062,10 @@
     var out = Object.keys(m.est || {}).filter(function (k) { return m.est[k]; }).map(function (k) {
       var v = m.est[k]; return `<i class='${v > 0 ? 'sobe' : 'desce'}'>${CURTO_ATR[k]} ${v > 0 ? '+' : ''}${v}</i>`;
     });
-    if (PREGUICA[m.p.esp]) { out.push(`<i class='hab'>${m.descansa ? '😴 vai preguiçar' : '😴 Truant'}</i>`); }
-    if (LENTO[m.p.esp]) { out.push(`<i class='hab'>${lentoAtivo(m) ? '🐢 Início lento ' + m.lento + '/5' : '🐢 em força'}</i>`); }
+    var h = hab(m);
+    if (h === 'truant') { out.push(`<i class='hab'>${m.descansa ? '😴 vai preguiçar' : '😴 Truant'}</i>`); }
+    else if (h === 'slow-start') { out.push(`<i class='hab'>${lentoAtivo(m) ? '🐢 Slow Start ' + m.turnos + '/5' : '🐢 em força'}</i>`); }
+    else if (h) { out.push(`<i class='hab${HAB_INFO[h] ? '' : ' sem'}' title='${esc(HAB_INFO[h] ? HAB_INFO[h][1] : 'sem efeito na Arena')}'>✦ ${esc(nomeHab(h))}${m.flash ? ' 🔥' : ''}</i>`); }
     if (m.preso) { out.push(`<i class='hab'>🔒 ${esc(m.golpes[m.preso.idx].nome)}</i>`); }
     if (m.item && !m.base) { out.push(`<i class='hab'>${m.item === 'mega' ? '💎 Pedra Mega' : '🔴 Fator Gmax'}</i>`); }
     return out.join('');
@@ -646,6 +1087,7 @@
       <div class='carta-rot'>${lado === 'j' ? 'VOCÊ' : 'OPONENTE'}</div>
       <div class='carta-arte'><div class='holo'></div>${K.img([K.URL.arte(p.id), K.URL.home(p.id)])}</div>
       <div class='carta-nome'>${esc(p.nome)}</div><div class='carta-tipos'>${p.t.map(K.chip).join('')}</div>
+      <div class='carta-nh'>${lado === 'j' || !emOnline() ? `<i class='nat-pt ${classeNat(m.nat, m.base || p, m.golpesBase || m.golpes)}'></i>${NATURES[m.nat].nome} · ` : ''}✦ ${esc(nomeHab(hab(m)) || '—')}</div>
       <div class='sts'>${stats}</div>${time}</div>`;
   }
   function jaEscolhi() { return emOnline() && !!S.on.p.minhas[S.on.p.turno]; }
@@ -866,7 +1308,7 @@
   async function usarGolpe(lado, idx) {
     var B = S.B, foe = lado === 'j' ? 'o' : 'j', a = ativo(B[lado]), d = ativo(B[foe]);
     var quem = lado === 'j' ? esc(a.p.nome) : esc(a.p.nome) + ' inimigo';
-    var uso = golpeEfetivo(a, idx);
+    var uso = golpeEfetivo(a, idx, d);
     if (uso.descansa) {
       mensagem(`<b>${quem}</b> está a preguiçar...`); registrar(`<b>${esc(a.p.nome)}</b> está a preguiçar (Truant).`);
       await esperar(900); return false;
@@ -879,8 +1321,9 @@
     await animarAtaque(lado, foe, g);
     var r = calcular(a, d, g);
     if (r.erro || r.ef === 0) {
-      efeitosDepois(a, d, g, r, 0, uso.idx);
+      var ev0 = efeitosDepois(a, d, g, r, 0, uso.idx);
       if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); }
+      else if (r.bloq) { await mostrarPassos(ev0.passos); }
       else { bannerFx('NÃO AFETA', 'nul'); mensagem(`Não afeta ${esc(d.p.nome)}...`); registrar('Não afetou.'); await esperar(800); }
       return false;
     }
@@ -895,9 +1338,7 @@
     await animarHp(foe, d);
     if (r.acertos > 1) { registrar(`Acertou ${r.acertos} vezes!`); }
     var ev = efeitosDepois(a, d, g, r, hpAntes - d.hp, uso.idx);
-    if (ev.dreno > 0) { textoFx('+' + ev.dreno, 'num cura', lado); registrar(`<b>${esc(a.p.nome)}</b> recuperou ${ev.dreno} HP.`); await animarHp(lado, a); }
-    else if (ev.dreno < 0) { textoFx(String(ev.dreno), 'num', lado); registrar(`<b>${esc(a.p.nome)}</b> sofreu ${-ev.dreno} de recuo.`); await animarHp(lado, a); }
-    if (ev.est.length) { await mostrarEstagios(ev.est, lado, foe, a, d); }
+    await mostrarPassos(ev.passos);
     if (ev.cansou) { registrar(`<b>${esc(a.p.nome)}</b> acalmou-se.`); }
     if (d.hp <= 0) {
       if (mon) { mon.classList.add('desmaio'); }
@@ -909,18 +1350,33 @@
     }
     return false;
   }
-  async function mostrarEstagios(lista, lado, foe, a, d) {
-    var txt = lista.map(function (x) {
-      var nome = esc((x.quem === 'a' ? a : d).p.nome), atr = NOME_ATR[x.k];
-      if (!x.d) { return `${atr} de <b>${nome}</b> não pode ${x.pedido > 0 ? 'subir' : 'baixar'} mais.`; }
-      var grau = Math.abs(x.d) >= 2 ? ' muito' : '';
-      return `${atr} de <b>${nome}</b>${x.d > 0 ? ' subiu' : ' baixou'}${grau}!`;
-    });
-    txt.forEach(function (t) { registrar(t); });
-    lista.forEach(function (x) { if (x.d) { textoFx(CURTO_ATR[x.k] + (x.d > 0 ? ' ↑' : ' ↓'), x.d > 0 ? 'num cura' : 'num', x.quem === 'a' ? lado : foe); } });
-    mensagem(txt[0]);
-    var h = $('ar-palco'); if (h) { var est = h.querySelectorAll('.hud-est'); if (est.length) { est[0].innerHTML = estHtml(ativo(S.B.j)); if (est[1]) { est[1].innerHTML = estHtml(ativo(S.B.o)); } } }
-    await esperar(700);
+  /* mostra os passos das regras (habilidades, atributos, HP) um a um */
+  function ladoDe(m) { return S.B.j.time.indexOf(m) >= 0 ? 'j' : 'o'; }
+  function atualizarHud() {
+    var h = $('ar-palco'); if (!h) { return; }
+    var est = h.querySelectorAll('.hud-est');
+    if (est[0]) { est[0].innerHTML = estHtml(ativo(S.B.j)); } if (est[1]) { est[1].innerHTML = estHtml(ativo(S.B.o)); }
+  }
+  function estTexto(x) {
+    var nome = esc(x.m.p.nome), atr = NOME_ATR[x.k];
+    if (!x.d) { return `${atr} de <b>${nome}</b> não pode ${x.pedido > 0 ? 'subir' : 'baixar'} mais.`; }
+    return `${atr} de <b>${nome}</b>${x.d > 0 ? ' subiu' : ' baixou'}${Math.abs(x.d) >= 2 ? ' muito' : ''}!`;
+  }
+  async function mostrarPassos(P) {
+    for (var i = 0; i < P.length; i++) {
+      var x = P[i], lado = x.m ? ladoDe(x.m) : 'j';
+      if (x.tipo === 'hab') {
+        textoFx(x.nome, 'hab', lado); registrar(`<i class='hab-tx'>✦ ${esc(x.nome)}</i> de <b>${esc(x.m.p.nome)}</b>`);
+        mensagem(`✦ <b>${esc(x.nome)}</b> de ${esc(x.m.p.nome)}`); await esperar(650);
+      } else if (x.tipo === 'est') {
+        var t = estTexto(x); registrar(t); mensagem(t);
+        if (x.d) { textoFx(CURTO_ATR[x.k] + (x.d > 0 ? ' ↑' : ' ↓'), x.d > 0 ? 'num cura' : 'num', lado); }
+        atualizarHud(); await esperar(550);
+      } else if (x.tipo === 'hp') {
+        textoFx((x.d > 0 ? '+' : '') + x.d, x.d > 0 ? 'num cura' : 'num', lado); registrar(x.txt); mensagem(x.txt);
+        if (ativo(S.B[lado]) === x.m) { await animarHp(lado, x.m); } else { await esperar(500); }
+      } else { registrar(x.txt); mensagem(x.txt); await esperar(600); }
+    }
   }
   async function animarEvolucao(lado, antes, m) {
     var c = centro(lado), nome = esc(antes.nome), depois = esc(m.p.nome);
@@ -965,7 +1421,8 @@
   async function entrar(lado, idx) {
     var B = S.B, velho = ativo(B[lado]);
     if (velho.gmax > 0) { desfazerGmax(velho); }
-    sairDeCampo(velho);
+    var saida = []; sairDeCampo(velho, saida);
+    if (saida.length) { await mostrarPassos(saida); }
     B[lado].ativo = idx;
     var nome = esc(ativo(B[lado]).p.nome);
     S.msg = lado === 'j' ? `Vai, <b>${nome}</b>!` : `O oponente enviou <b>${nome}</b>!`;
@@ -973,6 +1430,7 @@
     render();
     var mon = $('mon-' + lado); if (mon) { mon.classList.add('entra'); }
     await esperar(700);
+    await mostrarPassos(aoEntrar(ativo(B[lado]), ativo(B[lado === 'j' ? 'o' : 'j']), []));
   }
   async function aposDesmaio(ladoKO) {
     var B = S.B;
@@ -1009,7 +1467,7 @@
     for (var lg of ['j', 'o']) {
       var mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
-      fimTurnoLado(B[lg]);
+      await mostrarPassos(fimTurnoLado(B[lg]));
     }
     S.ocupado = false; S.msg = 'O que <b>' + esc(ativo(B.j).p.nome) + '</b> vai fazer?'; render();
     if (S.auto) { proximoAuto(); }
@@ -1022,7 +1480,7 @@
   }
   async function iniciarBatalha(online) {
     if (!online && !Object.keys(itensDoTime('o')).length) { S.itens.o = itensAuto(S.time.o); }
-    S.B = { j: novoLado(S.time.j, S.mv.j, itensDoTime('j')), o: novoLado(S.time.o, S.mv.o, itensDoTime('o')) };
+    S.B = { j: novoLado(S.time.j, S.mv.j, itensDoTime('j'), extrasDo('j')), o: novoLado(S.time.o, S.mv.o, itensDoTime('o'), extrasDo('o')) };
     if (online) { S.B.online = true; S.B.host = online.host; }
     S.log = ['A batalha começou!']; S.fim = null; S.escolha = null; S.sim = null; S.ocupado = true;
     S.msg = 'A batalha vai começar!'; S.tela = 'batalha'; render();
@@ -1037,6 +1495,9 @@
     }
     var mj = $('mon-j'), mo = $('mon-o');
     if (mj) { mj.classList.add('entra'); } if (mo) { mo.classList.add('entra'); }
+    // habilidades de entrada (online pela ordem canónica: anfitrião primeiro)
+    var ordemEntrada = online ? (online.host ? ['j', 'o'] : ['o', 'j']) : ['j', 'o'];
+    for (var oe = 0; oe < 2; oe++) { var le = ordemEntrada[oe]; await mostrarPassos(aoEntrar(ativo(S.B[le]), ativo(S.B[le === 'j' ? 'o' : 'j']), [])); }
     S.ocupado = false; S.msg = 'O que <b>' + esc(a.nome) + '</b> vai fazer?'; render();
     if (online) { await resolverOnline(); }
   }
@@ -1081,7 +1542,7 @@
     for (var g = 0; g < 2; g++) {
       var lg = lados[g], mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
-      fimTurnoLado(B[lg]);
+      await mostrarPassos(fimTurnoLado(B[lg]));
     }
     fecharTurno(n);
     S.ocupado = false; S.msg = p.deles[p.turno] ? msgVez() + ' <i>(o adversário já escolheu)</i>' : msgVez(); render();
@@ -1090,7 +1551,7 @@
   /* fim do turno: avança o contador e compara o estado com o do outro lado */
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
-      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id; }).join(',') + ':' + JSON.stringify(ativo(B[l]).est);
+      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat; }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l]));
     }).join('|');
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
@@ -1129,7 +1590,8 @@
   function comecarOnline() {
     // só o anfitrião: sorteia a semente e manda os dois times
     var cfg = { t: 'inicio', semente: Math.floor(Math.random() * 4294967296), modo: S.modo, times: { host: S.time.j.slice(), conv: S.on.opTime.slice() },
-      mv: { host: golpesDoTime(S.time.j, S.mv.j), conv: S.on.opMv || {} }, itens: { host: itensDoTime('j'), conv: S.on.opItens || {} } };
+      mv: { host: golpesDoTime(S.time.j, S.mv.j), conv: S.on.opMv || {} }, itens: { host: itensDoTime('j'), conv: S.on.opItens || {} },
+      nat: { host: doTime('j', S.nat), conv: S.on.opNat || {} }, hab: { host: doTime('j', S.hab), conv: S.on.opHab || {} } };
     NET.enviar(cfg);
     iniciarOnline(cfg);
   }
@@ -1160,6 +1622,9 @@
     S.mv.j = limparGolpes(host ? mv.host : mv.conv); S.mv.o = limparGolpes(host ? mv.conv : mv.host);
     var it = cfg.itens || {};
     S.itens.j = limparItens(host ? it.host : it.conv); S.itens.o = limparItens(host ? it.conv : it.host);
+    var na = cfg.nat || {}, hb = cfg.hab || {};
+    S.nat.j = limparNat(host ? na.host : na.conv); S.nat.o = limparNat(host ? na.conv : na.host);
+    S.hab.j = limparHab(host ? hb.host : hb.conv); S.hab.o = limparHab(host ? hb.conv : hb.host);
     S.ge = null;
     S.on.host = host; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     rng = mulberry32(cfg.semente);
@@ -1169,7 +1634,7 @@
     if (avisarOutro && emOnline()) { NET.enviar({ t: 'sala' }); }
     rng = Math.random;
     S.tela = 'selecao'; S.B = null; S.fim = null; S.escolha = null; S.ocupado = false; S.auto = false;
-    S.time.o = []; S.mv.o = {}; S.itens.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
+    S.time.o = []; S.mv.o = {}; S.itens.o = {}; S.nat.o = {}; S.hab.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     enviarTime(); render();
   }
   function ausenteHtml() { return NET && NET.estado === 'ausente' ? "<div class='on-aus'>⏸ O adversário saiu da app. A batalha continua quando ele voltar.</div>" : ''; }
@@ -1183,7 +1648,7 @@
   function revancheOnline() {
     var p = S.on.p;
     if (p.revEu && p.revEle && NET.papel === 'host') {
-      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice(); S.on.opMv = golpesDoTime(S.time.o, S.mv.o); S.on.opItens = itensDoTime('o');
+      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice(); S.on.opMv = golpesDoTime(S.time.o, S.mv.o); S.on.opItens = itensDoTime('o'); S.on.opNat = doTime('o', S.nat); S.on.opHab = doTime('o', S.hab);
       comecarOnline();
     }
   }
@@ -1210,9 +1675,13 @@
     Object.keys(it || {}).forEach(function (id) { if (n < 1 && P[id] && (it[id] === 'mega' || it[id] === 'gmax') && itensPossiveis(P[id]).indexOf(it[id]) >= 0) { out[id] = it[id]; n++; } });
     return out;
   }
+  /* nature e habilidade só de quem está no time; o que vem do outro lado é validado */
+  function doTime(l, mapa) { var out = {}; S.time[l].forEach(function (id) { if (mapa[l][id] != null) { out[id] = mapa[l][id]; } }); return out; }
+  function limparNat(x) { var out = {}; Object.keys(x || {}).forEach(function (id) { if (P[id] && typeof x[id] === 'number' && NATURES[x[id]]) { out[id] = x[id]; } }); return out; }
+  function limparHab(x) { var out = {}; Object.keys(x || {}).forEach(function (id) { if (P[id] && typeof x[id] === 'number' && habsDe(P[id])[x[id]]) { out[id] = x[id]; } }); return out; }
   function enviarTime() {
     if (!S.online || !ligadoOuAusente()) { return; }
-    NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), itens: itensDoTime('j'), pronto: S.on.pronto });
+    NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), itens: itensDoTime('j'), nat: doTime('j', S.nat), hab: doTime('j', S.hab), pronto: S.on.pronto });
   }
   function talvezComecar() {
     if (NET.papel === 'host' && S.on.pronto && S.on.opPronto && S.time.j.length === tamanhoTime() && S.on.opTime.length === tamanhoTime()) { comecarOnline(); }
@@ -1228,7 +1697,7 @@
         S.modo = m.m; S.time.j = S.time.j.slice(0, tamanhoTime()); S.on.pronto = false; enviarTime();
         if (S.tela !== 'batalha') { render(); } break;
       case 'time':
-        S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opItens = limparItens(m.itens); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
+        S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opItens = limparItens(m.itens); S.on.opNat = limparNat(m.nat); S.on.opHab = limparHab(m.hab); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
         if (S.tela !== 'batalha') { render(); talvezComecar(); } break;
       case 'inicio': iniciarOnline(m); break;
       case 'retomar': retomarOnline(m); break;
@@ -1322,7 +1791,8 @@
       case 'editarGolpes':
         ev.stopPropagation();
         var eid = +el.getAttribute('data-id');
-        S.ge = { lado: l, id: eid, ids: golpesDe(P[eid], S.mv[l][eid]).filter(function (g) { return g.id != null; }).map(function (g) { return g.id; }), busca: '', tipo: '', cat: '' };
+        S.ge = { lado: l, id: eid, ids: golpesDe(P[eid], S.mv[l][eid]).filter(function (g) { return g.id != null; }).map(function (g) { return g.id; }), busca: '', tipo: '', cat: '',
+          aba: 'golpes', nat: S.nat[l][eid] != null ? S.nat[l][eid] : null, hab: S.hab[l][eid] != null ? S.hab[l][eid] : null };
         render(); break;
       case 'geToggle':
         var gid = +el.getAttribute('data-g'), pos = S.ge.ids.indexOf(gid);
@@ -1332,8 +1802,14 @@
       case 'geCat': S.ge.cat = el.getAttribute('data-c'); geAtualizar(); break;
       case 'geAuto': S.ge.ids = golpesAuto(P[S.ge.id]) || []; geAtualizar(); break;
       case 'geFechar': S.ge = null; render(); break;
+      case 'geAba': S.ge.aba = el.getAttribute('data-a'); render(); break;
+      case 'geNat': var ni = +el.getAttribute('data-n'); S.ge.nat = S.ge.nat === ni ? null : ni; render(); break;
+      case 'geHab': S.ge.hab = +el.getAttribute('data-h'); render(); break;
+      case 'geNatAuto': S.ge.nat = null; S.ge.hab = null; render(); break;
       case 'geOk':
         if (S.ge.ids.length) { S.mv[S.ge.lado][S.ge.id] = S.ge.ids.slice(); }
+        if (S.ge.nat != null) { S.nat[S.ge.lado][S.ge.id] = S.ge.nat; } else { delete S.nat[S.ge.lado][S.ge.id]; }
+        if (S.ge.hab != null) { S.hab[S.ge.lado][S.ge.id] = S.ge.hab; } else { delete S.hab[S.ge.lado][S.ge.id]; }
         if (S.online && S.ge.lado === 'j') { S.on.pronto = false; S.ge = null; enviarTime(); }
         S.ge = null; S.previa = null; render(); break;
       case 'lado': S.lado = l; render(); break;
@@ -1387,7 +1863,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
@@ -1398,7 +1874,8 @@
       var s = window.__arena; if (!s) { return; }
       var local = s.tela === 'batalha' && s.B && !s.B.online && fotoEstavel;
       K.guardar('arena', { versao: s.versao, tela: local ? 'batalha' : 'selecao', modo: s.modo, lado: s.lado, time: s.online ? { j: s.time.j, o: [] } : s.time,
-        mv: s.online ? { j: s.mv.j, o: {} } : s.mv, itens: s.online ? { j: s.itens.j, o: {} } : s.itens, busca: s.busca, tipo: s.tipo, gen: s.gen, log: local ? fotoEstavel.log : [],
+        mv: s.online ? { j: s.mv.j, o: {} } : s.mv, itens: s.online ? { j: s.itens.j, o: {} } : s.itens,
+        nat: s.online ? { j: s.nat.j, o: {} } : s.nat, hab: s.online ? { j: s.hab.j, o: {} } : s.hab, busca: s.busca, tipo: s.tipo, gen: s.gen, log: local ? fotoEstavel.log : [],
         msg: local ? fotoEstavel.msg : '', escolha: local ? fotoEstavel.escolha : null, fim: local ? fotoEstavel.fim : null, foto: local ? fotoEstavel.B : null });
     });
   }

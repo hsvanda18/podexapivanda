@@ -383,6 +383,31 @@ def efeito_atributos(m, meta):
     return ["a" if cat == 6 else "u", chance or 100, mud]
 
 
+# ---------- habilidades (Arena) ----------
+CONSULTA_HAB = (
+    "{ p: pokemon_v2_pokemon(order_by:{id:asc}) { id pa: pokemon_v2_pokemonabilities(order_by:{slot:asc}) { ability_id is_hidden } } "
+    "h: pokemon_v2_ability { id name n: pokemon_v2_abilitynames(where:{language_id:{_eq:9}}) { name } } }"
+)
+
+
+def hab_raw():
+    return baixar(GRAPHQL, json.dumps({"query": CONSULTA_HAB}).encode())["data"]
+
+
+def montar_hab(raw):
+    """window.HABILIDADES_DADOS: h = habilidades [chave, nome]; a = id do pokémon -> índices em h
+    (por ordem de slot; a habilidade oculta vem como -(índice + 1))."""
+    nomes = {h["id"]: (h["name"], h["n"][0]["name"] if h["n"] else proper(h["name"].replace("-", " "))) for h in raw["h"]}
+    usadas = sorted({x["ability_id"] for p in raw["p"] for x in p["pa"] if x["ability_id"] in nomes}, key=lambda i: nomes[i][1])
+    idx = {aid: i for i, aid in enumerate(usadas)}
+    a = {}
+    for p in raw["p"]:
+        lista = [(-(idx[x["ability_id"]] + 1) if x["is_hidden"] else idx[x["ability_id"]]) for x in p["pa"] if x["ability_id"] in idx]
+        if lista:
+            a[p["id"]] = lista
+    return {"h": [list(nomes[i]) for i in usadas], "a": a}
+
+
 def gravar(nome, obj):
     DADOS.mkdir(parents=True, exist_ok=True)
     texto = f"window.{nome}=" + json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + ";\n"
@@ -398,6 +423,10 @@ def main():
     golpes = montar_golpes(com_cache("golpes.json", golpes_raw), poke)
     print(f"  {len(golpes['g'])} golpes, {sum(len(x) for x in golpes['a'].values())} aprendizados")
     gravar("GOLPES_DADOS", golpes)
+    print("Habilidades...")
+    hab = montar_hab(com_cache("habilidades.json", hab_raw))
+    print(f"  {len(hab['h'])} habilidades")
+    gravar("HABILIDADES_DADOS", hab)
     print("Cartas TCG...")
     cartas = montar_cartas(com_cache("tcg.json", cartas_raw))
     print(f"  {len(cartas['c'])} cartas")
