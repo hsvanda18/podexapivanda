@@ -304,3 +304,6 @@ html.movel .gd-f { height: 34px; font-size: 12px; }
 /* ---------- vantagens ---------- */
 .fq-dica { margin-left: 8px; font-size: 9px; font-weight: 600; letter-spacing: 0; color: #5C6575; }
 .ch-van { box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
+
+/* carregamento dos dados sob pedido */
+.dx-giro { display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); border-top-color: #FFCB05; animation: dx-gira .8s linear infinite; }

@@ -8,8 +8,11 @@
   if (!D) { return; }
   if (window.PK && window.PK.v === D.v) { return; }
 
-  var SPR = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/';
-  var ICO = 'https://raw.githubusercontent.com/partywhale/pokemon-type-icons/main/icons/';
+  /* imagens pelo CDN jsDelivr (cache de 7 dias); se falhar, pkImgErro tenta o GitHub direto */
+  var CDN_SPR = 'https://cdn.jsdelivr.net/gh/PokeAPI/sprites@master/', RAW_SPR = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/';
+  var SPR = CDN_SPR + 'sprites/pokemon/';
+  var ICO = 'https://cdn.jsdelivr.net/gh/partywhale/pokemon-type-icons@main/icons/';
+  function urlReserva(u) { return u.indexOf(CDN_SPR) === 0 ? RAW_SPR + u.slice(CDN_SPR.length) : ''; }
   var P = {}, LISTA = [];
   D.pk.forEach(function (r) {
     var p = { id: r[0], nome: r[1], esp: r[2], t: r[4] ? [r[3], r[4]] : [r[3]],
@@ -24,7 +27,7 @@
   function corTipo(t) { return (D.tp[t] || ['', '#888'])[1]; }
   function nomeTipo(t) { return (D.tp[t] || [t])[0]; }
   function icone(t, tam) {
-    return `<img class='pk-ico' src='${ICO + t}.svg' title='${nomeTipo(t)}' style='width:${tam || 18}px;height:${tam || 18}px'/>`;
+    return `<img class='pk-ico' src='${ICO + t}.svg' alt='' title='${nomeTipo(t)}' style='width:${tam || 18}px;height:${tam || 18}px'/>`;
   }
   function chip(t) {
     return `<span class='pk-chip' style='--c:${corTipo(t)}'>${icone(t, 14)}${nomeTipo(t)}</span>`;
@@ -46,7 +49,9 @@
     return `<img class='${cls || ''}' src='${urls[0]}' data-alt='${urls.slice(1).join('|')}' onerror='pkImgErro(this)' ${extra || ''}/>`;
   }
   window.pkImgErro = function (el) {
-    var alts = (el.getAttribute('data-alt') || '').split('|').filter(Boolean);
+    var alts = (el.getAttribute('data-alt') || '').split('|').filter(Boolean), raw = urlReserva(el.src);
+    if (raw && !el.getAttribute('data-raw')) { el.setAttribute('data-raw', '1'); el.src = raw; return; }
+    el.removeAttribute('data-raw');
     if (!alts.length) { el.onerror = null; el.style.visibility = 'hidden'; return; }
     el.setAttribute('data-alt', alts.slice(1).join('|'));
     el.src = alts[0];
@@ -77,5 +82,5 @@
 
   window.PK = { v: D.v, D: D, P: P, LISTA: LISTA, TIPOS: TIPOS, ef: ef, efTotal: efTotal, corTipo: corTipo,
     nomeTipo: nomeTipo, icone: icone, chip: chip, esc: esc, fmtEf: fmtEf, normalizar: normalizar, URL: URL,
-    img: img, escala: escala, aleatorio: aleatorio, embaralhar: embaralhar, particulas: particulas };
+    img: img, escala: escala, SPR: SPR, aleatorio: aleatorio, embaralhar: embaralhar, particulas: particulas };
 })();

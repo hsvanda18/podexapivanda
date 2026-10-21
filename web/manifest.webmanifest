@@ -1,0 +1,17 @@
+{
+  "name": "Pokédex Web",
+  "short_name": "Pokédex",
+  "description": "Pokédex, Arena, Tipos, Quiz e Safari com dados reais de Pokémon.",
+  "lang": "pt-BR",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0E14",
+  "theme_color": "#0B0E14",
+  "icons": [
+    { "src": "img/icone-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/icone-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "img/icone-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

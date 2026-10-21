@@ -21,6 +21,7 @@ Pokédex interativa e animada que roda direto no navegador, sem instalar nada. C
 - **Safari**: minijogo estilo GBA em canvas: ande pelo mato, encontre Pokémon selvagens e capture com Pokébolas (fórmula de captura da 3ª geração). Como na Zona Safari dos jogos, dá para atirar **Pedra/Lama** (captura 2× mais fácil, mas ele fica irritado e foge mais) ou **Isca** (ele fica a comer e foge menos, mas a captura fica 2× mais difícil).
 - **Quiz "Quem é esse Pokémon?"**: silhueta, 4 opções ou digitar o nome, cronômetro, dicas, sequência e recorde.
 - Link direto para um Pokémon: `index.html#25` abre o Pikachu.
+- **App instalável e rápida (PWA)**: um Service Worker guarda o site e as imagens no aparelho; as imagens vêm do CDN jsDelivr e as cartas e golpes da Pokédex só são baixados quando abres esses modos. No celular dá para "Adicionar à tela inicial".
 - **Funciona no celular**: a Pokédex vira uma página vertical (lista em tela cheia, setas ‹ › para passear, toque na carta para ampliar); Arena, Tipos, Quiz e Safari giram para a horizontal sozinhas, com direcional de toque no Safari.
 
 ## Estrutura
@@ -46,6 +47,8 @@ Depois abra http://localhost:8765.
 ```bash
 python scripts/atualizar_dados.py
 ```
+
+Ao publicar código novo, mude a constante `VERSAO` em `web/sw.js` para os aparelhos trocarem a cache do site.
 
 Use `--rapido` para reaproveitar o último download (fica em `scripts/.cache/`). Depois é só fazer commit e push: o site se atualiza sozinho.
 

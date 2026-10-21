@@ -2,9 +2,9 @@
    Usa window.PK (comum.js), window.DEX_DADOS (colunas extras) e window.CARTAS (TCG).
    Seleção exibida: forma clicada > evolução clicada > item da lista > primeiro do filtro. */
 (function () {
-  var K = window.PK, X = window.DEX_DADOS, C = window.CARTAS, raiz = document.getElementById('app-raiz');
+  var K = window.PK, X = window.DEX_DADOS, C = null, raiz = document.getElementById('app-raiz');
   if (!K || !X || !raiz) { return; }
-  var esc = K.esc, P = K.P, SPR = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/';
+  var esc = K.esc, P = K.P, SPR = K.SPR;
 
   // mesmos IDs sem arquivo no repositório de sprites (Pokemon.m)
   var SEM_GIF = [990, 991, 992, 993, 994, 995, 1006, 1008, 1010, 1017, 1022, 1023, 1024, 1025, 10072, 10075, 10078, 10079, 10081, 10082, 10084, 10085, 10086, 10087, 10088, 10089, 10257, 10264, 10265, 10266, 10267, 10268, 10269, 10270, 10271, 10273, 10274, 10275, 10276, 10277];
@@ -32,6 +32,7 @@
   /* ---------- cartas TCG por espécie ---------- */
   var porEspecie = null;
   function cartasDe(p) {
+    C = window.CARTAS;
     if (!C) { return []; }
     if (!porEspecie) {
       porEspecie = {};
@@ -44,6 +45,22 @@
       return { img: c[5] || ('https://images.pokemontcg.io/' + s[0] + '/' + c[1] + '.png'), rar: C.r[c[2]], col: s[1] + ' · ' + s[2] };
     });
   }
+
+  /* ---------- dados sob pedido ---------- */
+  var baixando = {};
+  function precisa(global, arquivo) {
+    if (window[global]) { return true; }
+    if (!baixando[arquivo]) {
+      baixando[arquivo] = true;
+      var sc = document.createElement('script');
+      sc.src = arquivo;
+      sc.onload = function () { renderSel(); };
+      sc.onerror = function () { baixando[arquivo] = false; var e = $('dx-carregando'); if (e) { e.textContent = 'Sem ligação. Toca no modo outra vez para tentar.'; } };
+      document.head.appendChild(sc);
+    }
+    return false;
+  }
+  function carregandoHtml(oque) { return `<div class='cg-vazio' id='dx-carregando'><i class='dx-giro'></i>A carregar ${oque}...</div>`; }
 
   /* ---------- estado ---------- */
   var S = { gen: '', tipo: '', lend: false, busca: '', lista: null, evo: null, forma: null, modo: 1, exibido: null, animar: null };
@@ -101,6 +118,9 @@
       `<div class='hero-nome${classeNome}'>${esc(nome)}</div>` + (p.cat ? `<div class='hero-cat'>${esc(p.cat)}</div>` : '') +
       `<div class='hero-pills'><span class='pill'>${esc(p.genLabel)}</span><span class='pill'>Estágio ${p.est}/${p.ests}</span>` +
       `<span class='pill${rarCls}'>${p.rar}</span>${shiny ? "<span class='pill pill-shiny'>✨ SHINY</span>" : ''}</div>`;
+    // cartas e golpes só são baixados quando o modo é aberto pela primeira vez
+    if (S.modo === 4 && !precisa('GOLPES_DADOS', 'dados/golpes.js')) { return `<div class='hero${cls}'>${topo}${carregandoHtml('golpes')}</div>`; }
+    if (S.modo === 3 && !precisa('CARTAS', 'dados/cartas.js')) { return `<div class='hero${cls}'>${topo}${carregandoHtml('cartas')}</div>`; }
     if (S.modo === 4) { return `<div class='hero${cls}'>${topo}${golpesHtml(p)}</div>`; }
     if (S.modo === 3) {
       var cartas = cartasDe(p);
@@ -133,9 +153,10 @@
   }
 
   /* ---------- golpes de ataque que esta forma aprende (dados/golpes.js) ---------- */
-  var GD = window.GOLPES_DADOS;
+  var GD = null;
   function acertos(g) { return g[7] <= 1 ? 1 : g[6] === 2 && g[7] === 5 ? 3.1 : (g[6] + g[7]) / 2; }
   function golpesDex(p) {
+    GD = window.GOLPES_DADOS;
     if (!GD) { return []; }
     var ids = GD.a[p.id];
     if (!ids) { var base = PADRAO.find(function (x) { return x.esp === p.esp; }); ids = base && GD.a[base.id]; }

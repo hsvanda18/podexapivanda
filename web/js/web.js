@@ -30,4 +30,9 @@
   window.addEventListener('resize', layout);
   window.addEventListener('orientationchange', function () { setTimeout(layout, 150); });
   layout();
+
+  // Service Worker: guarda site e imagens no aparelho (abre rápido e funciona sem rede)
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () { /* sem cache offline */ }); });
+  }
 })();
