@@ -66,6 +66,23 @@ end $$;
 revoke all on function public.entrar_sala(text) from public, anon;
 grant execute on function public.entrar_sala(text) to authenticated;
 
+-- ---------- sair da sala: quem criou fecha-a; o convidado liberta o lugar ----------
+create or replace function public.sair_sala(p_codigo text) returns void
+language plpgsql security definer set search_path = public as $$
+declare s public.salas;
+begin
+  select * into s from public.salas where codigo = upper(p_codigo) for update;
+  if not found then return; end if;
+  if s.host = auth.uid() then
+    delete from public.salas where codigo = s.codigo;
+  elsif s.conv = auth.uid() then
+    update public.salas set conv = null, time_conv = '[]', golpes_conv = '{}', pronto_conv = false, pronto_host = false, estado = 'sala'
+      where codigo = s.codigo;
+  end if;
+end $$;
+revoke all on function public.sair_sala(text) from public, anon;
+grant execute on function public.sair_sala(text) to authenticated;
+
 -- ---------- segurança: só os dois jogadores veem e mexem na sala ----------
 alter table public.salas enable row level security;
 alter table public.jogadas enable row level security;

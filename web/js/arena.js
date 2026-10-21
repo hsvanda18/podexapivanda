@@ -244,7 +244,7 @@
   }
   /* estado online: escolhas por turno (n) dos dois lados, trocas forçadas e verificação de sincronia */
   function novaPartida() {
-    return { turno: 0, minhas: {}, deles: {}, trocas: {}, syncEu: {}, syncEle: {}, forma: null, revEu: false, revEle: false, esperaTroca: null, resolverTroca: null };
+    return { turno: 0, minhas: {}, deles: {}, trocas: {}, minhasTrocas: {}, syncEu: {}, syncEle: {}, forma: null, revEu: false, revEle: false, esperaTroca: null, resolverTroca: null };
   }
   if (!S.on) {
     S.online = false;
@@ -254,7 +254,8 @@
   var NET = window.PKOnline;
   function emOnline() { return !!(S.B && S.B.online); }
   function $(id) { return document.getElementById(id); }
-  function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  /* S.rapido: reconstrói uma batalha online a partir das jogadas guardadas, sem esperar pelas animações */
+  function esperar(ms) { return S.rapido ? Promise.resolve() : new Promise(function (r) { setTimeout(r, ms); }); }
   function tamanhoTime() { return S.modo === 1 ? 1 : 3; }
 
   /* ================= SELEÇÃO ================= */
@@ -310,7 +311,7 @@
     var gens = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (g) {
       return `<span class='gc${S.gen === g ? ' on' : ''}' data-acao='gen' data-g='${g}'>${g ? 'Gen ' + g : 'Todas'}</span>`;
     }).join('');
-    var travaModo = S.online && NET.papel === 'conv' && NET.estado === 'ligado' ? ' off' : '';
+    var travaModo = S.online && NET.papel === 'conv' && ligadoOuAusente() ? ' off' : '';
     var rodape = S.online ? rodapeOnline() : `<div id='ar-previa'>${previaHtml()}</div>
         <div class='bt bt-go${cheio ? '' : ' off'}' data-acao='batalhar'>⚔ BATALHAR!</div>`;
     return `<div class='pk-palco sel${S.online ? ' sel-online' : ''}'>
@@ -341,8 +342,10 @@
       <div class='bt bt-sec' data-acao='entrarSala'>Entrar</div></div>`;
     if (!NET) {
       corpo = `<p class='sala-tx'>O modo online não carregou. Recarrega a página.</p>`;
+    } else if (!NET.configurado) {
+      corpo = `<p class='sala-tx'>O modo online ainda não está configurado neste site (falta ligar o Supabase em <b>js/config.js</b>).</p>`;
     } else if (e === 'off' || e === 'erro' || e === 'caiu') {
-      corpo = (e !== 'off' ? `<div class='sala-erro'>${esc(NET.erro)}</div>` : `<p class='sala-tx'>Joga contra um amigo noutro telemóvel ou computador. É grátis e não precisa de conta.</p>`) +
+      corpo = (e !== 'off' ? `<div class='sala-erro'>${esc(NET.erro)}</div>` : `<p class='sala-tx'>Joga contra um amigo noutro telemóvel ou computador. É grátis, não precisa de conta e podes minimizar a app: a batalha fica guardada.</p>`) +
         `<div class='bt bt-go sala-criar' data-acao='criarSala'>＋ Criar sala</div>` + entrarHtml;
     } else if (e === 'a-ligar') {
       corpo = `<div class='sala-espera'><i class='sala-giro'></i>${NET.papel === 'conv' ? 'A entrar na sala ' + esc(NET.codigo || '') + '...' : 'A criar a sala...'}</div>`;
@@ -356,20 +359,20 @@
         <a class='bt bt-zap' href='${zap}' target='_blank' rel='noopener'>💬 WhatsApp</a></div>
         <div class='sala-espera'><i class='sala-giro'></i>À espera do adversário...</div>
         <div class='bt bt-sec sala-sair' data-acao='sairSala'>Cancelar</div>`;
-    } else if (e === 'ligado') {
+    } else if (e === 'ligado' || e === 'ausente') {
       var n = tamanhoTime(), slots = '';
       for (var i = 0; i < n; i++) { slots += `<div class='sl sala-sl${i < S.on.opQtd ? ' cheio' : ''}'><b>${i < S.on.opQtd ? '?' : '+'}</b><span>${i < S.on.opQtd ? 'Escolhido' : 'A escolher...'}</span></div>`; }
       tag = S.on.opPronto ? '✓ pronto' : S.on.opQtd + '/' + n;
-      corpo = `<div class='sala-ok'>✓ Adversário ligado${NET.papel === 'conv' ? ' · sala ' + esc(NET.codigo) : ''}</div>
+      corpo = (e === 'ligado' ? `<div class='sala-ok'>✓ Adversário ligado${NET.papel === 'conv' ? ' · sala ' + esc(NET.codigo) : ''}</div>`
+        : `<div class='sala-aus'>⏸ Adversário fora da app${NET.papel === 'conv' ? ' · sala ' + esc(NET.codigo) : ''}</div>`) + `
         <div class='sel-slots m${n}'>${slots}</div>
         <p class='sala-tx'>${NET.papel === 'host' ? 'Tu escolhes o formato (1 x 1 ou Time de 3) lá em cima.' : 'O formato é escolhido por quem criou a sala.'} O time dele só aparece quando a batalha começar.</p>
         <div class='bt bt-sec sala-sair' data-acao='sairSala'>Sair da sala</div>`;
     }
-    var turn = NET && (e === 'sala' || e === 'ligado') ? `<div class='sala-turn${NET.turn ? ' on' : ''}'>${NET.turn ? '🛰 Retransmissão ativa (funciona em 4G/5G)' : 'Só ligação direta (sem retransmissão)'}</div>` : '';
-    return `<div class='sel-col sel-col-o sala'><div class='sel-col-tit'><span>${tit}</span><em>${tag}</em></div>${aviso}<div class='sala-corpo'>${corpo}${turn}</div></div>`;
+    return `<div class='sel-col sel-col-o sala'><div class='sel-col-tit'><span>${tit}</span><em>${tag}</em></div>${aviso}<div class='sala-corpo'>${corpo}</div></div>`;
   }
   function rodapeOnline() {
-    var ligado = NET && NET.estado === 'ligado', cheio = S.time.j.length === tamanhoTime();
+    var ligado = ligadoOuAusente(), cheio = S.time.j.length === tamanhoTime();
     var dica = !ligado ? 'Cria uma sala ou entra com o código de um amigo' :
       !cheio ? 'Monta o teu time e carrega em PRONTO · nível 50 · golpes definidos pelos tipos' :
       S.on.pronto ? (S.on.opPronto ? 'A começar...' : 'À espera que o adversário fique pronto...') : 'Time completo! Carrega em PRONTO';
@@ -500,7 +503,7 @@
   }
   function overlayHtml() {
     var B = S.B;
-    if (emOnline() && NET.estado !== 'ligado' && !S.fim) {
+    if (emOnline() && caiu() && !S.fim) {
       return `<div class='ov'><div class='ov-box'><div class='ov-tit'>${esc(NET.erro || 'A ligação caiu.')}</div>
         <div class='fim-sub'>A batalha online foi interrompida.</div>
         <div class='fim-bts'><div class='bt bt-go' data-acao='novo'>Voltar à sala</div></div></div></div>`;
@@ -519,7 +522,7 @@
       if (win) { for (var i = 0; i < 60; i++) { conf += `<i style='left:${(i * 37) % 100}%;background:${corTipo(K.TIPOS[i % 18])};animation-delay:${((i * 13) % 20) / 10}s;animation-duration:${2 + ((i * 7) % 15) / 10}s'></i>`; } }
       return `<div class='ov'><div class='confete'>${conf}</div><div class='ov-box fim ${win ? 'win' : 'lose'}'>
         <div class='fim-tit'>${win ? 'VITÓRIA!' : 'DERROTA'}</div>
-        <div class='fim-sub'>${win ? 'Seu time venceu a batalha!' : 'O oponente venceu desta vez.'}${emOnline() && NET.estado !== 'ligado' ? '<br>' + esc(NET.erro || 'A ligação caiu.') : ''}</div>
+        <div class='fim-sub'>${win ? 'Seu time venceu a batalha!' : 'O oponente venceu desta vez.'}${emOnline() && caiu() ? '<br>' + esc(NET.erro || 'A ligação caiu.') : ''}</div>
         <div class='fim-bts'>${botaoRevanche()}<div class='bt bt-sec' data-acao='novo'>Novos times</div></div>
       </div></div>`;
     }
@@ -546,7 +549,7 @@
             var marcada = emOnline() && S.on.p.forma === i;
             return `<div class='bt bt-mega ${op.tipo}${marcada ? ' marcada' : ''}${S.ocupado || S.auto || S.fim || S.escolha || jaEscolhi() ? ' off' : ''}' data-acao='transformar' data-i='${i}'>${marcada ? '✓ ' : ''}${rotuloForma(op)}</div>`;
           }).join('')}
-          ${emOnline() ? `<div class='on-tag'>🌐 Online · ${S.on.host ? 'tu criaste a sala' : 'sala ' + esc(NET.codigo || '')}</div>` :
+          ${emOnline() ? `<div class='on-tag'>🌐 Online · ${S.on.host ? 'tu criaste a sala' : 'sala ' + esc(NET.codigo || '')}</div><div id='ar-aus'>${ausenteHtml()}</div>` :
             `<div class='bt bt-sec${S.auto ? ' on' : ''}' data-acao='auto'>${S.auto ? '⏸ Automático' : '▶ Automático'}</div>
           <div class='bt bt-gold' data-acao='simular'>🎲 Simular ×1000</div>`}
           <div class='bt bt-sec' data-acao='novo'>Sair</div>
@@ -809,7 +812,7 @@
     var mj = $('mon-j'), mo = $('mon-o');
     if (mj) { mj.classList.add('entra'); } if (mo) { mo.classList.add('entra'); }
     S.ocupado = false; S.msg = 'O que <b>' + esc(a.nome) + '</b> vai fazer?'; render();
-    if (online) { resolverOnline(); }
+    if (online) { await resolverOnline(); }
   }
 
   /* ================= ONLINE: TURNOS ================= */
@@ -855,7 +858,7 @@
     }
     fecharTurno(n);
     S.ocupado = false; S.msg = p.deles[p.turno] ? msgVez() + ' <i>(o adversário já escolheu)</i>' : msgVez(); render();
-    resolverOnline();
+    return resolverOnline();
   }
   /* fim do turno: avança o contador e compara o estado com o do outro lado */
   function fecharTurno(n) {
@@ -881,11 +884,14 @@
     }
     var idx = await new Promise(function (ok) {
       var p = S.on.p;
-      if (ladoKO === 'j') {
-        p.resolverTroca = function (i) { p.resolverTroca = null; S.escolha = null; NET.enviar({ t: 'troca', n: n, idx: i }); ok(i); };
+      if (ladoKO === 'j' && p.minhasTrocas[n] != null) { ok(p.minhasTrocas[n]); }
+      else if (ladoKO === 'j') {
+        S.rapido = false;
+        p.resolverTroca = function (i) { p.resolverTroca = null; S.escolha = null; p.minhasTrocas[n] = i; NET.enviar({ t: 'troca', n: n, idx: i }); ok(i); };
         S.escolha = 'forcada'; render();
       } else if (p.trocas[n] != null) { ok(p.trocas[n]); }
       else {
+        S.rapido = false;
         p.esperaTroca = function (i) { p.esperaTroca = null; ok(i); };
         mensagem('À espera que o adversário escolha o próximo Pokémon...');
       }
@@ -900,7 +906,25 @@
     NET.enviar(cfg);
     iniciarOnline(cfg);
   }
-  function iniciarOnline(cfg) {
+  function iniciarOnline(cfg) { prepararOnline(cfg); iniciarBatalha({ host: S.on.host }); }
+  async function retomarOnline(m) {
+    prepararOnline(m.cfg);
+    var p = S.on.p;
+    (m.jogadas || []).forEach(function (j) {
+      var d = j.dados || {};
+      if (j.tipo === 'acao') { (j.minha ? p.minhas : p.deles)[j.n] = d; }
+      else if (j.tipo === 'troca') { (j.minha ? p.minhasTrocas : p.trocas)[j.n] = d.idx; }
+      else if (j.tipo === 'sync' && !j.minha) { p.syncEle[j.n] = d.h; }
+      else if (j.tipo === 'revanche') { if (j.minha) { p.revEu = true; } else { p.revEle = true; } }
+    });
+    S.online = true; S.rapido = true;
+    try { await iniciarBatalha({ host: S.on.host }); } finally { S.rapido = false; }
+    if (!S.fim && !S.escolha) { S.msg = p.minhas[p.turno] ? 'À espera da jogada do adversário...' : p.deles[p.turno] ? msgVez() + ' <i>(o adversário já escolheu)</i>' : msgVez(); }
+    registrar('<i>Batalha retomada.</i>');
+    render();
+    revancheOnline();
+  }
+  function prepararOnline(cfg) {
     var host = NET.papel === 'host';
     S.modo = cfg.modo;
     S.time.j = (host ? cfg.times.host : cfg.times.conv).slice();
@@ -911,7 +935,6 @@
     S.on.host = host; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     rng = mulberry32(cfg.semente);
     S.auto = false; S.sim = null;
-    iniciarBatalha({ host: host });
   }
   function voltarSala(avisarOutro) {
     if (avisarOutro && emOnline()) { NET.enviar({ t: 'sala' }); }
@@ -920,9 +943,10 @@
     S.time.o = []; S.mv.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     enviarTime(); render();
   }
+  function ausenteHtml() { return NET && NET.estado === 'ausente' ? "<div class='on-aus'>⏸ O adversário saiu da app. A batalha continua quando ele voltar.</div>" : ''; }
   function botaoRevanche() {
     if (!emOnline()) { return `<div class='bt bt-go' data-acao='revanche'>↻ REVANCHE</div>`; }
-    if (NET.estado !== 'ligado') { return ''; }
+    if (!ligadoOuAusente()) { return ''; }
     var p = S.on.p;
     return p.revEu ? `<div class='bt bt-go off'>À espera do adversário...</div>` :
       `<div class='bt bt-go' data-acao='revanche'>${p.revEle ? '↻ ACEITAR REVANCHE' : '↻ PEDIR REVANCHE'}</div>`;
@@ -950,8 +974,10 @@
     });
     return out;
   }
+  function ligadoOuAusente() { return NET && (NET.estado === 'ligado' || NET.estado === 'ausente'); }
+  function caiu() { return NET && (NET.estado === 'caiu' || NET.estado === 'erro' || NET.estado === 'off'); }
   function enviarTime() {
-    if (!S.online || NET.estado !== 'ligado') { return; }
+    if (!S.online || !ligadoOuAusente()) { return; }
     NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), pronto: S.on.pronto });
   }
   function talvezComecar() {
@@ -971,6 +997,11 @@
         S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
         if (S.tela !== 'batalha') { render(); talvezComecar(); } break;
       case 'inicio': iniciarOnline(m); break;
+      case 'retomar': retomarOnline(m); break;
+      case 'saiu':
+        S.on.opPronto = false; S.on.opTime = []; S.on.opQtd = 0; S.on.aviso = 'O adversário saiu da sala.';
+        if (emOnline()) { voltarSala(false); } else { render(); }
+        break;
       case 'acao': p.deles[m.n] = m.a; if (emOnline() && !S.ocupado && m.n === p.turno && p.minhas[m.n] == null) { mensagem(msgVez() + ' <i>(o adversário já escolheu)</i>'); } resolverOnline(); break;
       case 'troca': p.trocas[m.n] = m.idx; if (p.esperaTroca) { p.esperaTroca(m.idx); } break;
       case 'sync': p.syncEle[m.n] = m.h; conferirSync(m.n); break;
@@ -981,11 +1012,13 @@
   if (NET && !window.__arenaNet) {
     window.__arenaNet = true;
     NET.aoReceber(function (m) { aoReceber(m); });
+    NET.versao = VERSAO;
     NET.aoMudarEstado(function (estado) {
-      if (estado === 'ligado') { S.on.aviso = ''; NET.enviar({ t: 'ola', v: VERSAO }); }
-      if (estado !== 'ligado') { S.on.opPronto = false; S.on.opTime = []; S.on.opQtd = 0; }
-      if (emOnline() && estado !== 'ligado') { var pr = S.on.p; if (pr.esperaTroca) { pr.esperaTroca = null; } }
-      if (S.tela !== 'batalha' || (emOnline() && estado !== 'ligado')) { render(); }
+      if (estado === 'ligado') { if (/saiu/.test(S.on.aviso || '')) { S.on.aviso = ''; } enviarTime(); }
+      if (estado === 'off' || estado === 'caiu' || estado === 'erro') { S.on.opPronto = false; S.on.opTime = []; S.on.opQtd = 0; }
+      if (S.tela !== 'batalha') { render(); return; }
+      if (emOnline() && caiu()) { render(); return; }
+      var aus = $('ar-aus'); if (aus) { aus.innerHTML = ausenteHtml(); }
     });
   }
   function codigoDoLink() { var m = /^#sala-([A-Za-z0-9]{6})$/.exec(location.hash || ''); return m ? m[1].toUpperCase() : ''; }
@@ -1088,7 +1121,8 @@
   window.__arenaApi = { simular: simular, golpesDe: golpesDe, statusDe: statusDe, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
-  if (codigoLink && NET && NET.estado === 'off') { S.online = true; S.lado = 'j'; S.on.codigo = codigoLink; NET.entrar(codigoLink); }
+  var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
+  if (codigoRetomar && NET && NET.estado === 'off') { S.online = true; S.lado = 'j'; S.on.codigo = codigoRetomar; NET.entrar(codigoRetomar); }
   if (!window.__arenaGuarda) {
     window.__arenaGuarda = true;
     K.aoSair(function () {

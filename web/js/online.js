@@ -1,149 +1,244 @@
-/* Ligação P2P (WebRTC via PeerJS) para a Arena online.
-   Não há servidor próprio: o servidor público gratuito do PeerJS só apresenta os dois browsers;
-   depois as mensagens vão direto de um para o outro.
-   window.PKOnline: criarSala() · entrar(codigo) · enviar(msg) · aoReceber(fn) · aoMudarEstado(fn) · sair()
-   estados: off · a-ligar · sala (à espera do convidado) · ligado · caiu · erro */
+/* Arena online pelo Supabase (login anónimo + base de dados + tempo real).
+   A sala e todas as jogadas ficam guardadas: quem minimiza a app ou perde a rede volta e continua
+   (a Arena reconstrói a batalha a partir das jogadas, porque o motor é determinístico).
+   window.PKOnline: criarSala() · entrar(codigo) · enviar(msg) · aoReceber(fn) · aoMudarEstado(fn) · sair() · link()
+   estados: off · a-ligar · sala (à espera do convidado) · ligado · ausente (o outro minimizou) · caiu · erro
+   mensagens entregues à Arena: ola · modo · time · inicio · retomar · acao · troca · sync · revanche · sala · saiu */
 (function () {
-  var URL_PEERJS = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-  var PREFIXO = 'pkdx-', LETRAS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  var ESPERA_LIGAR = 15000, SILENCIO_MAX = 30000, TOLERANCIA_ICE = 8000;
-  /* TURN (Metered, plano gratuito): retransmite quando a ligação direta não abre (algumas redes 4G/5G).
-     Sem resposta da Metered em 4 s, segue só com a ligação direta, como antes. */
-  var TURN_APP = 'pokedex', TURN_CHAVE = '533fda93247b4db8870af29d8f4bed9a8245';
-  var STUN_PUBLICO = [{ urls: 'stun:stun.l.google.com:19302' }];
-  var iceGuardado = null;
-  var peer = null, conn = null, ouvintes = [], estadoFns = [], timerPing = null, timerLigar = null, ultimo = 0;
-  var O = window.PKOnline = { estado: 'off', papel: null, codigo: null, erro: '' };
+  var CFG = window.PK_CONFIG || {};
+  var URL_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js';
+  var LETRAS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  var CHAVE_SALA = 'pkdx:sala-online';
+  var sb = null, canal = null, ouvintes = [], estadoFns = [];
+  var at = null; // sala atual: { codigo, papel, uid, partida, row, vistos:{}, pendentes:[], outroTime:'', pedidoSala:false }
+  var O = window.PKOnline = { estado: 'off', papel: null, codigo: null, erro: '', versao: '' };
+
+  O.configurado = !!(CFG.supabaseUrl && CFG.supabaseChave);
 
   function avisar(estado, erro) {
+    if (O.estado === estado && (erro || '') === O.erro) { return; }
     O.estado = estado; O.erro = erro || '';
     estadoFns.forEach(function (f) { f(estado, O.erro); });
   }
-  function carregar() {
+  function entregar(m) { ouvintes.forEach(function (f) { f(m); }); }
+  function guardarSala(codigo) { try { if (codigo) { localStorage.setItem(CHAVE_SALA, codigo); } else { localStorage.removeItem(CHAVE_SALA); } } catch (e) { /* ignora */ } }
+  O.salaGuardada = function () { try { return localStorage.getItem(CHAVE_SALA) || ''; } catch (e) { return ''; } };
+
+  function carregarLib() {
     return new Promise(function (ok, falha) {
-      if (window.Peer) { ok(); return; }
+      if (window.supabase && window.supabase.createClient) { ok(); return; }
       var s = document.createElement('script');
-      s.src = URL_PEERJS;
-      s.onload = ok;
+      s.src = URL_LIB; s.onload = ok;
       s.onerror = function () { falha(new Error('Não foi possível carregar o modo online. Verifica a ligação à internet.')); };
       document.head.appendChild(s);
     });
   }
-  function obterIce() {
-    if (!TURN_APP || !TURN_CHAVE || !window.fetch) { return Promise.resolve(null); }
-    if (iceGuardado && Date.now() - iceGuardado.em < 3600000) { return Promise.resolve(iceGuardado.lista); }
-    var ctrl = window.AbortController ? new AbortController() : null;
-    if (ctrl) { setTimeout(function () { ctrl.abort(); }, 4000); }
-    return fetch('https://' + TURN_APP + '.metered.live/api/v1/turn/credentials?apiKey=' + TURN_CHAVE, ctrl ? { signal: ctrl.signal } : {})
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (lista) {
-        if (!Array.isArray(lista) || !lista.length) { return null; }
-        iceGuardado = { em: Date.now(), lista: lista };
-        return lista;
-      })
-      .catch(function () { return null; });
-  }
-  function opcoesPeer(ice) { return { debug: 0, config: { iceServers: STUN_PUBLICO.concat(ice || []) } }; }
-  function gerarCodigo() {
-    var c = '';
-    for (var i = 0; i < 6; i++) { c += LETRAS[Math.floor(Math.random() * LETRAS.length)]; }
-    return c;
+  function cliente() {
+    if (!O.configurado) { return Promise.reject(new Error('O modo online ainda não foi configurado (falta o Supabase em js/config.js).')); }
+    return carregarLib().then(function () {
+      if (!sb) { sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseChave, { auth: { persistSession: true, autoRefreshToken: true } }); }
+      return sb.auth.getSession();
+    }).then(function (r) {
+      if (r.data && r.data.session) { return r.data.session.user; }
+      return sb.auth.signInAnonymously().then(function (a) {
+        if (a.error) { throw new Error(/anonymous/i.test(a.error.message) ? 'O login anónimo está desligado no Supabase (Authentication → Sign In / Providers).' : a.error.message); }
+        return a.data.user;
+      });
+    });
   }
   function textoErro(e) {
-    var t = e && e.type;
-    if (t === 'peer-unavailable') { return 'Sala não encontrada. Confirma o código: a sala só existe enquanto quem a criou tiver a página aberta.'; }
-    if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') { return 'Sem ligação ao servidor de salas. Verifica a internet e tenta de novo.'; }
-    if (t === 'browser-incompatible') { return 'Este browser não suporta o modo online. Experimenta o Chrome, o Safari ou o Firefox atualizados.'; }
-    return 'A ligação falhou. Tenta de novo ou experimenta outra rede (por exemplo o Wi-Fi).';
+    var m = (e && e.message) || String(e || '');
+    if (/sala_nao_encontrada/.test(m)) { return 'Sala não encontrada. Confirma o código.'; }
+    if (/sala_cheia/.test(m)) { return 'Esta sala já tem dois jogadores.'; }
+    if (/Failed to fetch|NetworkError|network/i.test(m)) { return 'Sem ligação ao servidor. Verifica a internet e tenta de novo.'; }
+    return m || 'Algo correu mal. Tenta de novo.';
   }
-  function pararTimers() { clearInterval(timerPing); clearTimeout(timerLigar); timerPing = timerLigar = null; }
-  function caiu(msg) {
-    if (!conn && O.estado !== 'ligado') { return; }
-    pararTimers();
-    var c = conn; conn = null;
-    if (c) { try { c.close(); } catch (e) { /* já fechada */ } }
-    if (O.estado === 'ligado') { avisar('caiu', msg); }
+  function gerarCodigo() { var c = ''; for (var i = 0; i < 6; i++) { c += LETRAS[Math.floor(Math.random() * LETRAS.length)]; } return c; }
+  function col(base, papel) { return base + '_' + papel; }
+  function outro() { return at.papel === 'host' ? 'conv' : 'host'; }
+
+  /* ---------- estado da ligação (Presence) ---------- */
+  function presentes() {
+    if (!canal) { return {}; }
+    var st = canal.presenceState(), out = {};
+    Object.keys(st).forEach(function (k) { out[k] = (st[k] && st[k][0]) || {}; });
+    return out;
   }
-  function usarConexao(c) {
-    conn = c;
-    c.on('open', function () {
-      clearTimeout(timerLigar);
-      ultimo = Date.now();
-      avisar('ligado');
-      timerPing = setInterval(function () {
-        if (!conn || !conn.open) { return; }
-        conn.send({ t: 'ping' });
-        if (Date.now() - ultimo > SILENCIO_MAX) { caiu('O adversário deixou de responder.'); }
-      }, 5000);
-      // o WebRTC demora a dar a ligação por fechada; o estado ICE avisa mais cedo
-      var pc = c.peerConnection, timerIce = null;
-      if (pc && pc.addEventListener) {
-        pc.addEventListener('iceconnectionstatechange', function () {
-          var st = pc.iceConnectionState;
-          clearTimeout(timerIce);
-          if (st === 'failed' || st === 'closed') { caiu('A ligação caiu.'); }
-          else if (st === 'disconnected') { timerIce = setTimeout(function () { if (pc.iceConnectionState !== 'connected' && pc.iceConnectionState !== 'completed') { caiu('A ligação caiu.'); } }, TOLERANCIA_ICE); }
+  function recalcularEstado() {
+    if (!at) { return; }
+    var r = at.row;
+    if (!r.conv && at.papel === 'host') { avisar('sala'); return; }
+    var pres = presentes(), outroUid = at.papel === 'host' ? r.conv : r.host, ele = pres[outroUid];
+    if (ele) {
+      if (O.estado !== 'ligado') { avisar('ligado'); entregar({ t: 'ola', v: ele.v || '' }); }
+    } else if (O.estado === 'ligado' || O.estado === 'a-ligar' || O.estado === 'sala') { avisar('ausente'); }
+  }
+
+  /* ---------- eventos da base de dados ---------- */
+  function aoMudarSala(ev) {
+    if (!at) { return; }
+    if (ev.eventType === 'DELETE') { sairLocal(); avisar('caiu', 'Quem criou a sala fechou-a.'); return; }
+    var antes = at.row, r = ev.new;
+    at.row = r;
+    if (antes.conv && !r.conv) { at.outroTime = ''; entregar({ t: 'saiu' }); }
+    tratarSala(antes, r);
+    recalcularEstado();
+  }
+  /* compara a sala com a versão anterior e entrega à Arena o que mudou do lado do outro jogador */
+  function tratarSala(antes, r) {
+    var o = outro();
+    if (at.papel === 'conv' && (!antes || antes.modo !== r.modo)) { entregar({ t: 'modo', m: r.modo }); }
+    var sinal = JSON.stringify([r[col('time', o)], r[col('golpes', o)], r[col('pronto', o)]]);
+    if (sinal !== at.outroTime) { at.outroTime = sinal; entregar({ t: 'time', ids: r[col('time', o)], mv: r[col('golpes', o)], pronto: r[col('pronto', o)] }); }
+    if (r.estado === 'batalha' && r.inicio && r.partida > at.partida) {
+      at.partida = r.partida;
+      if (at.papel === 'conv' || at.precisaInicio) { at.precisaInicio = false; entregar(Object.assign({ t: 'inicio' }, r.inicio)); }
+      var pend = at.pendentes.filter(function (j) { return j.partida === at.partida; });
+      at.pendentes = [];
+      pend.forEach(aoJogada);
+    }
+    if (antes && antes.estado === 'batalha' && r.estado === 'sala') {
+      if (at.pedidoSala) { at.pedidoSala = false; } else { entregar({ t: 'sala' }); }
+    }
+  }
+  function aoJogada(j) {
+    if (!at || at.vistos[j.id]) { return; }
+    if (j.partida > at.partida) { at.pendentes.push(j); return; }
+    at.vistos[j.id] = true;
+    if (j.partida !== at.partida || j.jogador === at.uid) { return; }
+    var d = j.dados || {};
+    if (j.tipo === 'acao') { entregar({ t: 'acao', n: j.n, a: d }); }
+    else if (j.tipo === 'troca') { entregar({ t: 'troca', n: j.n, idx: d.idx }); }
+    else if (j.tipo === 'sync') { entregar({ t: 'sync', n: j.n, h: d.h }); }
+    else if (j.tipo === 'revanche') { entregar({ t: 'revanche' }); }
+  }
+  function jogadasDaPartida(partida) {
+    return sb.from('jogadas').select('*').eq('codigo', at.codigo).eq('partida', partida).order('id').then(function (r) {
+      if (r.error) { throw r.error; }
+      return r.data || [];
+    });
+  }
+  /* ao (re)ligar: relê a sala e as jogadas que possam ter escapado enquanto a app estava minimizada */
+  function sincronizar(primeira) {
+    if (!at) { return Promise.resolve(); }
+    return sb.from('salas').select('*').eq('codigo', at.codigo).maybeSingle().then(function (r) {
+      if (r.error) { throw r.error; }
+      if (!r.data) { sairLocal(); avisar('caiu', 'Esta sala já não existe.'); return; }
+      var antes = at.row, row = r.data;
+      at.row = row;
+      if (primeira && row.estado === 'batalha' && row.inicio) {
+        // página nova (ou reaberta): a Arena reconstrói a batalha com todas as jogadas
+        at.partida = row.partida;
+        at.outroTime = JSON.stringify([row[col('time', outro())], row[col('golpes', outro())], row[col('pronto', outro())]]);
+        return jogadasDaPartida(row.partida).then(function (js) {
+          js.forEach(function (j) { at.vistos[j.id] = true; });
+          entregar({ t: 'retomar', cfg: row.inicio, jogadas: js.map(function (j) { return { n: j.n, tipo: j.tipo, dados: j.dados, minha: j.jogador === at.uid }; }) });
         });
       }
-    });
-    c.on('data', function (m) {
-      ultimo = Date.now();
-      if (!m || m.t === 'ping') { return; }
-      if (m.t === 'tchau') { caiu('O adversário saiu.'); return; }
-      if (m.t === 'cheia') { avisar('erro', 'Esta sala já tem dois jogadores.'); return; }
-      ouvintes.forEach(function (f) { f(m); });
-    });
-    c.on('close', function () { if (conn === c) { caiu('O adversário saiu.'); } });
-    c.on('error', function () { if (conn === c) { caiu('A ligação caiu.'); } });
+      at.precisaInicio = !primeira;
+      tratarSala(primeira ? null : antes, row);
+      if (row.estado === 'batalha') { return jogadasDaPartida(at.partida).then(function (js) { js.forEach(aoJogada); }); }
+    }).then(recalcularEstado).catch(function (e) { avisar('erro', textoErro(e)); });
   }
-  function limpar() {
-    pararTimers();
-    if (conn) { try { if (conn.open) { conn.send({ t: 'tchau' }); } conn.close(); } catch (e) { /* já fechada */ } }
-    if (peer) { try { peer.destroy(); } catch (e) { /* já destruído */ } }
-    conn = peer = null;
+  function ligarCanal() {
+    if (canal) { sb.removeChannel(canal); }
+    canal = sb.channel('sala-' + at.codigo, { config: { presence: { key: at.uid } } })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'salas', filter: 'codigo=eq.' + at.codigo }, aoMudarSala)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'jogadas', filter: 'codigo=eq.' + at.codigo }, function (ev) { aoJogada(ev.new); })
+      .on('presence', { event: 'sync' }, recalcularEstado);
+    var primeira = true;
+    canal.subscribe(function (status) {
+      if (status === 'SUBSCRIBED') {
+        canal.track({ v: O.versao, papel: at.papel });
+        sincronizar(primeira);
+        primeira = false;
+      } else if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && at) {
+        avisar('ausente');
+      }
+    });
+  }
+  function ligar(row, uid) {
+    at = { codigo: row.codigo, papel: row.host === uid ? 'host' : 'conv', uid: uid, partida: 0, row: row, vistos: {}, pendentes: [], outroTime: '', pedidoSala: false, precisaInicio: false };
+    O.codigo = row.codigo; O.papel = at.papel;
+    guardarSala(row.codigo);
+    ligarCanal();
+  }
+  function sairLocal() {
+    if (canal && sb) { sb.removeChannel(canal); }
+    canal = null; at = null; guardarSala('');
   }
 
+  /* ---------- API usada pela Arena ---------- */
   O.criarSala = function (tentativa) {
-    limpar(); O.papel = 'host'; O.codigo = null; avisar('a-ligar');
-    carregar().then(obterIce).then(function (ice) {
-      var codigo = gerarCodigo();
-      O.turn = !!ice;
-      peer = new window.Peer(PREFIXO + codigo, opcoesPeer(ice));
-      peer.on('open', function () { O.codigo = codigo; avisar('sala'); });
-      peer.on('connection', function (c) {
-        if (conn && conn.open) { c.on('open', function () { c.send({ t: 'cheia' }); setTimeout(function () { c.close(); }, 500); }); return; }
-        usarConexao(c);
+    sairLocal(); O.papel = 'host'; O.codigo = null; avisar('a-ligar');
+    cliente().then(function (user) {
+      return sb.from('salas').insert({ codigo: gerarCodigo(), versao: O.versao }).select().single().then(function (r) {
+        if (r.error) {
+          if (r.error.code === '23505' && (tentativa || 0) < 3) { O.criarSala((tentativa || 0) + 1); return; }
+          throw r.error;
+        }
+        ligar(r.data, user.id);
+        avisar('sala');
       });
-      // perder o servidor de salas não derruba uma partida já ligada
-      peer.on('disconnected', function () { if (peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) { /* tenta depois */ } } });
-      peer.on('error', function (e) {
-        if (e.type === 'unavailable-id' && (tentativa || 0) < 3) { O.criarSala((tentativa || 0) + 1); return; }
-        if (O.estado !== 'ligado') { avisar('erro', textoErro(e)); }
-      });
-    }).catch(function (e) { avisar('erro', e.message); });
+    }).catch(function (e) { avisar('erro', textoErro(e)); });
   };
-
   O.entrar = function (codigo) {
     codigo = String(codigo || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-    limpar(); O.papel = 'conv'; O.codigo = codigo; avisar('a-ligar');
+    sairLocal(); O.codigo = codigo; O.papel = null; avisar('a-ligar');
     if (codigo.length !== 6) { avisar('erro', 'O código da sala tem 6 letras ou números.'); return; }
-    carregar().then(obterIce).then(function (ice) {
-      O.turn = !!ice;
-      peer = new window.Peer(opcoesPeer(ice));
-      peer.on('open', function () {
-        usarConexao(peer.connect(PREFIXO + codigo, { reliable: true }));
-        timerLigar = setTimeout(function () {
-          if (O.estado !== 'ligado') { limpar(); avisar('erro', 'Não deu para ligar à sala. Confirma o código ou tenta outra rede (por exemplo o Wi-Fi em vez dos dados móveis).'); }
-        }, ESPERA_LIGAR);
+    cliente().then(function (user) {
+      return sb.rpc('entrar_sala', { p_codigo: codigo }).then(function (r) {
+        if (r.error) { throw r.error; }
+        ligar(r.data, user.id);
       });
-      peer.on('error', function (e) { if (O.estado !== 'ligado') { limpar(); avisar('erro', textoErro(e)); } });
-    }).catch(function (e) { avisar('erro', e.message); });
+    }).catch(function (e) { guardarSala(''); avisar('erro', textoErro(e)); });
   };
-
-  O.enviar = function (m) { if (conn && conn.open) { conn.send(m); return true; } return false; };
+  /* tenta de novo algumas vezes: uma jogada perdida pararia a batalha */
+  function gravar(fn, tentativas) {
+    return fn().then(function (r) {
+      if (r && r.error) { throw r.error; }
+      return r;
+    }).catch(function (e) {
+      if ((tentativas || 0) < 3) { return new Promise(function (ok) { setTimeout(ok, 1500); }).then(function () { return gravar(fn, (tentativas || 0) + 1); }); }
+      console.warn('online: não gravou', e);
+    });
+  }
+  O.enviar = function (m) {
+    if (!at || !sb) { return false; }
+    var c = at.codigo, eu = at.papel, mud = {};
+    switch (m.t) {
+      case 'ola': return true; // a versão vai na Presence
+      case 'modo': gravar(function () { return sb.from('salas').update({ modo: m.m }).eq('codigo', c); }); return true;
+      case 'time':
+        mud[col('time', eu)] = m.ids || []; mud[col('golpes', eu)] = m.mv || {}; mud[col('pronto', eu)] = !!m.pronto;
+        gravar(function () { return sb.from('salas').update(mud).eq('codigo', c); }); return true;
+      case 'inicio':
+        at.partida = at.row.partida + 1;
+        var cfg = { semente: m.semente, modo: m.modo, times: m.times, mv: m.mv };
+        gravar(function () { return sb.from('salas').update({ estado: 'batalha', partida: at.partida, inicio: cfg, pronto_host: false, pronto_conv: false }).eq('codigo', c); });
+        return true;
+      case 'sala': at.pedidoSala = true; gravar(function () { return sb.from('salas').update({ estado: 'sala' }).eq('codigo', c); }); return true;
+      case 'acao': case 'troca': case 'sync': case 'revanche':
+        var dados = m.t === 'acao' ? m.a : m.t === 'troca' ? { idx: m.idx } : m.t === 'sync' ? { h: m.h } : null;
+        var linha = { codigo: c, partida: at.partida, n: m.t === 'revanche' ? -1 : m.n, tipo: m.t, dados: dados };
+        gravar(function () { return sb.from('jogadas').upsert(linha, { onConflict: 'codigo,partida,n,jogador,tipo', ignoreDuplicates: true }); });
+        return true;
+    }
+    return false;
+  };
   O.aoReceber = function (f) { ouvintes.push(f); };
   O.aoMudarEstado = function (f) { estadoFns.push(f); };
-  O.sair = function () { limpar(); O.papel = O.codigo = null; avisar('off'); };
+  O.sair = function () {
+    var c = at && at.codigo;
+    if (c && sb) { sb.rpc('sair_sala', { p_codigo: c }).then(function () { /* feito */ }); }
+    sairLocal(); O.papel = O.codigo = null; avisar('off');
+  };
   O.link = function () { return location.origin + location.pathname + '#sala-' + O.codigo; };
-  window.addEventListener('pagehide', limpar);
+
+  // ao voltar à app depois de minimizar, apanha o que mudou entretanto
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && at && sb) {
+      if (canal && canal.state !== 'joined') { ligarCanal(); } else { sincronizar(false); }
+    }
+  });
 })();
