@@ -310,8 +310,8 @@ def montar_cartas(raw):
 
 # ---------- golpes reais (Arena) ----------
 CONSULTA_GOLPES = (
-    "{ m: pokemon_v2_move(where:{power:{_gt:0}}) { id name power accuracy priority pp move_damage_class_id type_id "
-    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id move_meta_ailment_id ailment_chance flinch_chance } "
+    "{ m: pokemon_v2_move(where:{_or:[{power:{_gt:0}},{move_damage_class_id:{_eq:1}}]}) { id name power accuracy priority pp move_damage_class_id type_id move_target_id "
+    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id move_meta_ailment_id ailment_chance flinch_chance healing } "
     "sc: pokemon_v2_movemetastatchanges { change stat_id } "
     "n: pokemon_v2_movenames(where:{language_id:{_eq:9}}) { name } } "
     "p: pokemon_v2_pokemon(order_by:{id:asc}) { id ms: pokemon_v2_pokemonmoves(distinct_on: move_id) { move_id } } }"
@@ -357,11 +357,51 @@ def estado_golpe(m, meta):
     return [e, meta.get("ailment_chance") or 100] if e else 0
 
 
+# ---------- golpes de estado e de reforço ----------
+# alvos (move_target_id): no próprio (7 user, 4 users-field, 5 user-or-ally, 13 user-and-allies), no adversário (6, 8, 9, 10, 11), campo (12)
+ALVO_PROPRIO = {4, 5, 7, 13}
+ALVO_ADVERSARIO = {6, 8, 9, 10, 11}
+CLIMA_GOLPE = {"sunny-day": "sol", "rain-dance": "chuva", "sandstorm": "areia", "snowscape": "neve", "hail": "neve",
+               "electric-terrain": "t-eletrico", "grassy-terrain": "t-planta", "psychic-terrain": "t-psiquico", "misty-terrain": "t-nevoa"}
+CURA_CLIMA = {"synthesis": "cura-sol", "moonlight": "cura-sol", "morning-sun": "cura-sol", "shore-up": "cura-areia"}
+# mecânicas que a Arena não tem (custos de HP, trocas, armadilhas, aliados, condições especiais)
+ESTADO_FORA = {"strength-sap", "fillet-away", "clangorous-soul", "venom-drench", "captivate", "flower-shield", "rototiller",
+               "magnetic-flux", "gear-up", "wish", "heal-pulse", "floral-healing", "purify", "pollen-puff", "parting-shot",
+               "memento", "healing-wish", "lunar-dance", "baton-pass", "shed-tail", "stuff-cheeks", "tar-shot", "octolock",
+               "belly-drum", "curse", "acupressure", "aromatic-mist", "decorate", "coaching", "yawn", "power-shift",
+               "swallow", "geomancy"}
+# golpes recentes sem metadados na PokeAPI
+EF_ESTADO_EXTRA = {"victory-dance": ["u", 100, [["atk", 1], ["def", 1], ["spe", 1]]], "tidy-up": ["u", 100, [["atk", 1], ["spe", 1]]],
+                   "spicy-extract": ["a", 100, [["atk", 2], ["def", -2]]]}
+
+
+def golpe_estado(m, meta, tipo):
+    """golpe só de estado: categoria 'S', sem poder; devolve None se a Arena não o sabe usar"""
+    nome, alvo = m["name"], m.get("move_target_id")
+    if nome in ESTADO_FORA:
+        return None
+    esp = CLIMA_GOLPE.get(nome) or CURA_CLIMA.get(nome) or ("rest" if nome == "rest" else "")
+    mud = [[STATS[x["stat_id"]], x["change"]] for x in (m.get("sc") or []) if x["stat_id"] in STATS]
+    ef = 0
+    if mud and (alvo in ALVO_PROPRIO or alvo in ALVO_ADVERSARIO):
+        ef = ["u" if alvo in ALVO_PROPRIO else "a", 100, mud]
+    ef = EF_ESTADO_EXTRA.get(nome, ef)
+    st = 0
+    e = "tox" if nome == "toxic" else ESTADOS.get(meta.get("move_meta_ailment_id") or 0)
+    if e and alvo in ALVO_ADVERSARIO:
+        st = [e, 100]
+    cura = (meta.get("healing") or 0) if alvo in ALVO_PROPRIO else 0
+    if not (ef or st or cura or esp):
+        return None
+    return [tipo, "S", 0, m["accuracy"] or 0, m["priority"] or 0, 1, 1, 0, 0, m.get("pp") or 10, ef, esp, st, 0, cura]
+
+
 def montar_golpes(raw, poke):
     """window.GOLPES_DADOS: g = golpes [nome, tipo, F/E, poder, precisão (0 = nunca erra), prioridade,
     acertos mín, acertos máx, dreno % (negativo = recuo), crítico (0 normal, 1 alto, 2 garantido),
     PP, efeito nos atributos [quem ('u' quem usa, 'a' alvo), chance %, [[atributo, estágios]...]] ou 0, especial ('hp', 'furia' ou ''),
-    estado no alvo [par|slp|frz|brn|psn|tox|conf|tri|dire, chance %] ou 0, chance % de fazer recuar];
+    estado no alvo [par|slp|frz|brn|psn|tox|conf|tri|dire, chance %] ou 0, chance % de fazer recuar, cura % do HP];
+    golpes de estado têm categoria 'S' e poder 0 (especial: clima 'sol'..., terreno 't-eletrico'..., 'rest', 'cura-sol', 'cura-areia');
     a = id do pokémon -> índices em g (formas sem lista usam a da forma padrão, no JS)."""
     tipo_id = {t["id"]: t["name"] for t in poke["t"]}
     aprendidos = {}
@@ -370,16 +410,21 @@ def montar_golpes(raw, poke):
     usados = set().union(*aprendidos.values())
     golpes = []
     for m in raw["m"]:
-        if m["id"] not in usados or m["name"] in GOLPES_FORA or m["type_id"] not in tipo_id or m["move_damage_class_id"] not in (2, 3):
+        if m["id"] not in usados or m["name"] in GOLPES_FORA or m["type_id"] not in tipo_id or m["move_damage_class_id"] not in (1, 2, 3):
             continue
         meta = (m.get("meta") or [{}])[0] or {}
         nome = m["n"][0]["name"] if m["n"] else proper(m["name"].replace("-", " "))
+        if m["move_damage_class_id"] == 1:
+            ge = golpe_estado(m, meta, tipo_id[m["type_id"]])
+            if ge:
+                golpes.append((m["id"], [nome] + ge))
+            continue
         crit = meta.get("crit_rate") or 0
         golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"],
                                  m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
                                  meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0,
                                  m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"], ""),
-                                 estado_golpe(m, meta), RECUO_EXTRA.get(m["name"], meta.get("flinch_chance") or 0)]))
+                                 estado_golpe(m, meta), RECUO_EXTRA.get(m["name"], meta.get("flinch_chance") or 0), 0]))
     golpes.sort(key=lambda x: x[1][0])
     idx = {mid: i for i, (mid, _) in enumerate(golpes)}
     a = {}
@@ -387,7 +432,9 @@ def montar_golpes(raw, poke):
         lista = sorted(idx[x] for x in ms if x in idx)
         if lista:
             a[pid] = lista
-    return {"g": [g for _, g in golpes], "a": a}
+    # antigos: a ordem dos golpes antes dos golpes de estado (times guardados com números são convertidos pelo nome)
+    antigos = json.loads((RAIZ / "scripts" / "golpes_v1.json").read_text(encoding="utf-8"))
+    return {"g": [g for _, g in golpes], "a": a, "antigos": antigos}
 
 
 def efeito_atributos(m, meta):

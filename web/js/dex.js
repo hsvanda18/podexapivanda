@@ -152,7 +152,7 @@
       (p.desc ? `<p class='hero-desc-m'>${esc(p.desc)}</p>` : '') + '</div>';
   }
 
-  /* ---------- golpes de ataque que esta forma aprende (dados/golpes.js) ---------- */
+  /* ---------- golpes que esta forma aprende (dados/golpes.js): de dano e de estado ---------- */
   var GD = null;
   function acertos(g) { return g[7] <= 1 ? 1 : g[6] === 2 && g[7] === 5 ? 3.1 : (g[6] + g[7]) / 2; }
   function golpesDex(p) {
@@ -162,29 +162,43 @@
     if (!ids) { var base = PADRAO.find(function (x) { return x.esp === p.esp; }); ids = base && GD.a[base.id]; }
     return (ids || []).map(function (i) { return GD.g[i]; });
   }
+  /* resumo de um golpe de estado: atributos, estado, cura, clima ou terreno */
+  var NOME_ATR = { atk: 'ATQ', def: 'DEF', spa: 'A.ESP', spd: 'D.ESP', spe: 'VEL' };
+  var EST_TX = { brn: 'queima', par: 'paralisa', psn: 'envenena', tox: 'envenena (tóxico)', slp: 'adormece', frz: 'congela', conf: 'confunde' };
+  var ESP_TX = { sol: 'sol', chuva: 'chuva', areia: 'tempestade de areia', neve: 'neve', 't-eletrico': 'terreno Elétrico', 't-planta': 'terreno de Planta',
+    't-psiquico': 'terreno Psíquico', 't-nevoa': 'terreno de Névoa', rest: 'dorme e recupera tudo', 'cura-sol': 'recupera 50%+', 'cura-areia': 'recupera 50%+' };
+  function estadoTexto(g) {
+    var x = [];
+    if (g[11]) { x.push((g[11][0] === 'u' ? 'em si: ' : 'no alvo: ') + g[11][2].map(function (y) { return NOME_ATR[y[0]] + ' ' + (y[1] > 0 ? '+' : '') + y[1]; }).join(' ')); }
+    if (g[13]) { x.push(EST_TX[g[13][0]] || ''); }
+    if (g[15]) { x.push('recupera ' + g[15] + '%'); }
+    if (ESP_TX[g[12]]) { x.push(ESP_TX[g[12]]); }
+    return x.join(' · ');
+  }
   function golpesHtml(p) {
     var todos = golpesDex(p), f = S.gfil || '';
-    var lista = todos.filter(function (g) { return !f || (f === 'stab' ? p.t.indexOf(g[1]) >= 0 : g[2] === f); })
-      .sort(function (a, b) { return b[3] * acertos(b) - a[3] * acertos(a) || a[0].localeCompare(b[0]); });
-    var filtros = [['', 'Todos'], ['stab', 'Do tipo dele'], ['F', 'Físicos'], ['E', 'Especiais']].map(function (x) {
+    var lista = todos.filter(function (g) { return !f || (f === 'stab' ? p.t.indexOf(g[1]) >= 0 && g[2] !== 'S' : g[2] === f); })
+      .sort(function (a, b) { return (a[2] === 'S') - (b[2] === 'S') || b[3] * acertos(b) - a[3] * acertos(a) || a[0].localeCompare(b[0]); });
+    var filtros = [['', 'Todos'], ['stab', 'Do tipo dele'], ['F', 'Físicos'], ['E', 'Especiais'], ['S', 'Estado']].map(function (x) {
       return `<button class='gd-f${f === x[0] ? ' on' : ''}' data-acao='gfil' data-f='${x[0]}'>${x[1]}</button>`;
     }).join('');
     var linhas = lista.map(function (g) {
       var tags = [];
-      if (p.t.indexOf(g[1]) >= 0) { tags.push("<i class='gd-stab'>STAB</i>"); }
+      if (p.t.indexOf(g[1]) >= 0 && g[2] !== 'S') { tags.push("<i class='gd-stab'>STAB</i>"); }
+      if (g[2] === 'S') { tags.push('<i>' + estadoTexto(g) + '</i>'); }
       if (g[5] > 0) { tags.push('<i>⚡ +' + g[5] + '</i>'); }
       if (g[7] > 1) { tags.push('<i>' + (g[6] === g[7] ? g[6] : g[6] + '–' + g[7]) + ' acertos</i>'); }
       if (g[8] > 0) { tags.push('<i>drena ' + g[8] + '%</i>'); }
       if (g[8] < 0) { tags.push('<i>recuo ' + (-g[8]) + '%</i>'); }
       if (g[9] === 1) { tags.push('<i>crítico alto</i>'); }
       if (g[9] === 2) { tags.push('<i>sempre crítico</i>'); }
-      return `<div class='gd' style='--c:${K.corTipo(g[1])}'>${K.icone(g[1], 18)}<b>${esc(g[0])}</b><span class='gd-cat'>${g[2] === 'F' ? 'Físico' : 'Especial'}</span>` +
-        `<span class='gd-n'>${g[3]}</span><span class='gd-n'>${g[4] ? g[4] + '%' : '—'}</span><em>${tags.join('')}</em></div>`;
+      return `<div class='gd' style='--c:${K.corTipo(g[1])}'>${K.icone(g[1], 18)}<b>${esc(g[0])}</b><span class='gd-cat'>${g[2] === 'F' ? 'Físico' : g[2] === 'E' ? 'Especial' : 'Estado'}</span>` +
+        `<span class='gd-n'>${g[2] === 'S' ? '—' : g[3]}</span><span class='gd-n'>${g[4] ? g[4] + '%' : '—'}</span><em>${tags.join('')}</em></div>`;
     }).join('');
-    return `<div class='cg-head'>GOLPES DE ATAQUE QUE ${esc(p.nome.toUpperCase())} APRENDE<b>${todos.length}</b></div>` +
+    return `<div class='cg-head'>GOLPES QUE ${esc(p.nome.toUpperCase())} APRENDE<b>${todos.length}</b></div>` +
       `<div class='gd-filtros'>${filtros}</div>` +
       (lista.length ? `<div class='gd-cab'><span></span><span>Golpe</span><span>Categoria</span><span class='gd-n'>Poder</span><span class='gd-n'>Precisão</span><span></span></div><div class='gd-lista'>${linhas}</div>`
-        : "<div class='cg-vazio'>Nenhum golpe de ataque nesta lista.</div>");
+        : "<div class='cg-vazio'>Nenhum golpe nesta lista.</div>");
   }
 
   function cabeca(p, titulo, extra) {

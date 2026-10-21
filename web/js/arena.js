@@ -27,9 +27,20 @@
   var GD = window.GOLPES_DADOS;
   var GR = GD ? GD.g.map(function (r, i) {
     return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9],
-      pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '', st: r[13] || null, fl: r[14] || 0 };
+      pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '', st: r[13] || null, fl: r[14] || 0, cura: r[15] || 0 };
   }) : [];
-  var VERSAO = D.v + '.' + GR.length + '.r6';
+  var GR_NOME = {}; GR.forEach(function (g) { GR_NOME[g.nome] = g; });
+  /* os golpes guardam-se pelo nome; números vêm de versões antigas (ordem em GOLPES_DADOS.antigos) */
+  function nomeGolpe(x) { return typeof x === 'number' ? (GD && GD.antigos ? GD.antigos[x] : null) : x; }
+  function converterMv(mv) {
+    var out = {};
+    Object.keys(mv || {}).forEach(function (id) {
+      var l = (mv[id] || []).map(nomeGolpe).filter(function (n) { return n && GR_NOME[n]; }).slice(0, 4);
+      if (l.length) { out[id] = l; }
+    });
+    return out;
+  }
+  var VERSAO = D.v + '.' + GR.length + '.r7';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -47,17 +58,33 @@
       (baixaPropria(g) ? 0.8 : 1) * (g.esp === 'hp' ? 0.75 : g.esp === 'furia' ? 0.9 : 1) * (g.pp <= 5 ? 0.95 : 1);
   }
   /* escolha automática: o melhor golpe de cada tipo do Pokémon, depois cobertura de outros tipos */
+  /* quanto vale um golpe de estado para p (0 a ~1), para a escolha automática */
+  function valorEstadoAuto(p, g) {
+    var pk = p.b.atk >= p.b.spa ? 'atk' : 'spa', v = 0;
+    if (g.ef && g.ef[0] === 'u') { g.ef[2].forEach(function (x) { v += x[1] * (x[0] === pk ? 0.35 : x[0] === 'spe' ? 0.21 : x[0] === 'def' || x[0] === 'spd' ? 0.1 : 0) * (x[1] < 0 ? 0.5 : 1); }); }
+    if (g.ef && g.ef[0] === 'a') { g.ef[2].forEach(function (x) { v += -x[1] * 0.08; }); }
+    if (g.st) { v += { brn: 0.45, par: 0.45, tox: 0.5, psn: 0.35, slp: 0.75, frz: 0.3, conf: 0.3 }[g.st[0]] || 0; }
+    if (g.cura) { v += g.cura / 100 * 0.9; }
+    if (g.esp === 'cura-sol' || g.esp === 'cura-areia') { v += 0.4; }
+    if (g.esp === 'rest') { v += 0.35; }
+    var beneficio = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice', 't-eletrico': 'electric', 't-planta': 'grass', 't-psiquico': 'psychic' }[g.esp];
+    if (beneficio && p.t.indexOf(beneficio) >= 0) { v += 0.3; }
+    return v * (g.ac ? g.ac / 100 : 1);
+  }
   function golpesAuto(p) {
-    var cand = aprende(p).sort(function (a, b) { return forca(p, b) - forca(p, a); });
+    var todos = aprende(p), estados = todos.filter(function (g) { return g.c === 'S'; });
+    var cand = todos.filter(function (g) { return g.c !== 'S'; }).sort(function (a, b) { return forca(p, b) - forca(p, a); });
     if (!cand.length) { return null; }
     var out = [], topo = forca(p, cand[0]);
     p.t.forEach(function (t) { var g = cand.find(function (x) { return x.t === t; }); if (g && out.length < 4) { out.push(g); } });
     cand.forEach(function (g) { if (out.length < 4 && out.indexOf(g) < 0 && forca(p, g) >= topo * 0.35 && !out.some(function (x) { return x.t === g.t; })) { out.push(g); } });
     cand.forEach(function (g) { if (out.length < 4 && out.indexOf(g) < 0) { out.push(g); } });
+    var est = estados.sort(function (a, b) { return valorEstadoAuto(p, b) - valorEstadoAuto(p, a); })[0];
+    if (est && valorEstadoAuto(p, est) >= 0.5 && out.length >= 3) { if (out.length === 4) { out[3] = est; } else { out.push(est); } }
     return out.map(function (g) { return g.id; });
   }
   function golpesDe(p, ids) {
-    var lista = (ids && ids.length ? ids : golpesAuto(p) || []).map(function (i) { return GR[i]; }).filter(Boolean);
+    var lista = (ids && ids.length ? ids : golpesAuto(p) || []).map(function (i) { return typeof i === 'number' ? GR[i] : GR_NOME[i]; }).filter(Boolean);
     return lista.length ? lista.slice(0, 4) : golpesGenericos(p);
   }
   /* reserva: os golpes por tipo de antes (Pokémon sem lista de golpes de dano, como o Ditto) */
@@ -164,7 +191,7 @@
     'sand-force': [2, 'com areia, golpes de Pedra, Terra e Aço ×1,3; imune à areia'], 'sand-veil': [1, 'com areia, o adversário acerta menos (precisão ×0,8); imune à areia'],
     'snow-cloak': [1, 'com neve, o adversário acerta menos (precisão ×0,8)'], 'rain-dish': [1, 'com chuva, recupera 1/16 do HP por turno'],
     'ice-body': [1, 'com neve, recupera 1/16 do HP por turno'], 'flower-gift': [2, 'com sol, Ataque e Def. Esp. ×1,5'],
-    'protosynthesis': [3, 'com sol, o melhor atributo ×1,3 (Velocidade ×1,5)'], 'overcoat': [1, 'imune ao dano da areia'],
+    'protosynthesis': [3, 'com sol, o melhor atributo ×1,3 (Velocidade ×1,5)'], 'overcoat': [2, 'imune ao dano da areia e aos pós (Spore, Sleep Powder...)'],
     'cloud-nine': [2, 'anula o clima enquanto está em campo'], 'air-lock': [2, 'anula o clima enquanto está em campo'],
     'fairy-aura': [4, 'golpes de Fada ×1,33 (para os dois lados)'], 'dark-aura': [4, 'golpes Sombrio ×1,33 (para os dois lados)'],
     'sword-of-ruin': [5, 'Defesa do adversário ×0,75'], 'beads-of-ruin': [5, 'Def. Esp. do adversário ×0,75'],
@@ -223,6 +250,8 @@
     'poison-touch': [3, 'os golpes físicos dele têm 30% de envenenar'], 'synchronize': [2, 'passa a queimadura, a paralisia ou o veneno a quem lhos causou'],
     'early-bird': [2, 'acorda duas vezes mais depressa'], 'steadfast': [2, 'quando recua: Velocidade +1'],
     'tangled-feet': [2, 'confuso, o adversário acerta metade das vezes'], 'stench': [2, 'os golpes dele têm 10% de fazer recuar'],
+    'prankster': [5, 'golpes de estado com prioridade +1 (mas não afetam Pokémon Sombrio)'],
+    'magic-bounce': [5, 'devolve os golpes de estado do adversário'], 'good-as-gold': [5, 'imune aos golpes de estado do adversário'],
     'merciless': [3, 'golpes contra envenenados são sempre críticos'],
     'aftermath': [2, 'derrubado por golpe físico: o atacante perde 1/4 do HP'], 'innards-out': [3, 'ao ser derrubado, fere o atacante com o HP que tinha']
   };
@@ -595,7 +624,7 @@
     if (op.tipo === 'mega') { var hm = habsDe(op.p); if (hm.length) { m.hab = m.habBase = hm[0].slug; } }
     if (op.tipo === 'gmax') {
       m.hpMax = Math.round(m.hpMax * 1.5); m.gmax = 3; m.preso = null;
-      m.golpes = m.golpesBase.map(function (g) { return { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0, pp: g.pp, max: true }; });
+      m.golpes = m.golpesBase.map(function (g) { return g.c === 'S' ? g : { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0, pp: g.pp, max: true }; });
     }
     m.hp = Math.max(1, Math.round(razao * m.hpMax));
   }
@@ -641,7 +670,7 @@
   }
   function prioGolpe(m, g) {
     var h = hab(m), t = tipoDe(m, g);
-    return (g.pr || 0) + (g.nome === 'Grassy Glide' && terreno(m) === 'planta' && noChao(m) ? 1 : 0) + (h === 'gale-wings' && t === 'flying' && m.hp === m.hpMax ? 1 : 0) + (h === 'triage' && g.dr > 0 ? 3 : 0);
+    return (g.pr || 0) + (h === 'prankster' && g.c === 'S' ? 1 : 0) + (g.nome === 'Grassy Glide' && terreno(m) === 'planta' && noChao(m) ? 1 : 0) + (h === 'gale-wings' && t === 'flying' && m.hp === m.hpMax ? 1 : 0) + (h === 'triage' && g.dr > 0 ? 3 : 0);
   }
   /* imunidades por habilidade: devolve a habilidade que bloqueou */
   function bloqueio(a, d, g, t, e) {
@@ -730,6 +759,7 @@
     return res;
   }
   function esperado(a, d, g) {
+    if (g.c === 'S') { return 0; }
     var t = tipoDe(a, g), e = efetividade(a, d, g, t);
     if (!e || bloqueio(a, d, g, t, e)) { return 0; }
     var h = hab(a), nc = Math.min(2, (g.ca || 0) + (h === 'super-luck' ? 1 : 0)), hd = habAlvo(a, d);
@@ -759,6 +789,74 @@
     if (!(a.pp[idx] > 0)) { idx = a.pp.findIndex(function (x) { return x > 0; }); }
     a.pp[idx] = Math.max(0, a.pp[idx] - (d && hab(d) === 'pressure' ? 2 : 1));
     return { g: a.golpes[idx], idx: idx };
+  }
+  /* ---------- golpes de estado e de reforço ---------- */
+  var POS = /^(Spore|Sleep Powder|Stun Spore|Poison Powder|Cotton Spore)$/;
+  function alvoAdversario(g) { return !!((g.ef && g.ef[0] === 'a') || g.st); }
+  /* porque é que um golpe de estado no adversário não teria efeito ('' = funciona) */
+  function falhaEstado(a, d, g) {
+    if (!alvoAdversario(g)) { return ''; }
+    var hd = habAlvo(a, d);
+    if (hab(a) === 'prankster' && tiposDe(d).indexOf('dark') >= 0) { return 'tipo'; }
+    if (hd === 'good-as-gold') { return 'hab'; }
+    if (g.nome === 'Thunder Wave' && efetividade(a, d, g, 'electric') === 0) { return 'tipo'; }
+    if (POS.test(g.nome) && (tiposDe(d).indexOf('grass') >= 0 || hd === 'overcoat')) { return hd === 'overcoat' ? 'hab' : 'tipo'; }
+    if (prioGolpe(a, g) > 0 && ((terreno(d) === 'psiquico' && noChao(d)) || hd === 'dazzling' || hd === 'queenly-majesty' || hd === 'armor-tail')) { return 'terreno'; }
+    return '';
+  }
+  function podeDormirRest(m) { var e = m.estado; m.estado = null; var ok = podeTerEstado(m, 'slp', null); m.estado = e; return ok; }
+  function usarEstado(a, d, g, P) {
+    if (alvoAdversario(g)) {
+      if (habAlvo(a, d) === 'magic-bounce' && d.hp > 0) { anunciar(d, P); P.push({ tipo: 'txt', txt: `<b>${esc(d.p.nome)}</b> devolveu o golpe!` }); var t = a; a = d; d = t; }
+      var f = falhaEstado(a, d, g);
+      if (f) { if (f === 'hab') { anunciar(d, P); } P.push({ tipo: 'txt', txt: `Não afeta <b>${esc(d.p.nome)}</b>.` }); return; }
+      var ac = precisaoDe(a, d, g);
+      if (!(ac === 0 || rng() * 100 < ac)) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); return; }
+      if (g.ef) { g.ef[2].forEach(function (x) { alterar(d, x[0], x[1], a, P); }); }
+      if (g.st && !aplicarEstado(d, g.st[0], a, P) && !g.ef) { P.push({ tipo: 'txt', txt: `Não teve efeito em <b>${esc(d.p.nome)}</b>.` }); }
+      return;
+    }
+    var nome = `<b>${esc(a.p.nome)}</b>`, falhou = false;
+    if (g.ef) { g.ef[2].forEach(function (x) { alterar(a, x[0], x[1], null, P); }); }
+    var cura = g.cura;
+    if (g.esp === 'cura-sol') { cura = clima(a) === 'sol' ? 66.7 : clima(a) ? 25 : 50; }
+    if (g.esp === 'cura-areia') { cura = clima(a) === 'areia' ? 66.7 : 50; }
+    if (cura && !mexerHp(a, Math.max(1, Math.floor(a.hpMax * cura / 100)), nome + ' recuperou {x} HP.', P)) { P.push({ tipo: 'txt', txt: nome + ' já tem o HP cheio.' }); }
+    if (g.esp === 'rest') {
+      if (a.hp === a.hpMax || a.estado === 'slp' || !podeDormirRest(a)) { falhou = true; }
+      else { a.hp = a.hpMax; a.estado = 'slp'; a.sono = 3; a.toxN = 0; P.push({ tipo: 'hp', m: a, d: 0, txt: nome + ' adormeceu e recuperou toda a saúde!' }); }
+    }
+    if (g.esp === 'sol' || g.esp === 'chuva' || g.esp === 'areia' || g.esp === 'neve') { falhou = !mudarClima(a, g.esp, P); }
+    if (g.esp && g.esp.indexOf('t-') === 0) { falhou = !mudarTerreno(a, g.esp.slice(2), P); }
+    if (falhou) { P.push({ tipo: 'txt', txt: 'Mas falhou!' }); }
+  }
+  /* IA: quanto vale usar um golpe de estado agora (na mesma escala do dano esperado) */
+  function valorEstadoIA(a, d, g, melhor) {
+    if (melhor >= d.hp || falhaEstado(a, d, g)) { return 0; }
+    var ameaca = melhorEsperado(d, a), aguenta = a.hp > ameaca * 2.2, v = 0, pk = a.st.atk >= a.st.spa ? 'atk' : 'spa';
+    if (g.ef && g.ef[0] === 'u' && aguenta) {
+      var ganho = 0;
+      g.ef[2].forEach(function (x) {
+        if (x[1] > 0 && a.est[x[0]] >= 4) { return; }
+        ganho += x[1] * (x[0] === pk ? 0.5 : x[0] === 'spe' ? (velocidade(a) < velocidade(d) ? 0.4 : 0.05) : x[0] === 'def' || x[0] === 'spd' ? 0.15 : 0);
+      });
+      if (ganho > 0) { v += melhor * ganho * 1.6; }
+    }
+    if (g.ef && g.ef[0] === 'a' && aguenta) {
+      var fk = d.st.atk >= d.st.spa ? 'atk' : 'spa';
+      g.ef[2].forEach(function (x) { if (d.est[x[0]] > -3) { v += melhor * -x[1] * (x[0] === fk ? 0.3 : x[0] === 'def' || x[0] === 'spd' ? 0.2 : x[0] === 'spe' ? 0.15 : 0.05); } });
+    }
+    if (g.st && podeTerEstado(d, g.st[0], a)) {
+      var f = { brn: d.st.atk > d.st.spa ? 1.0 : 0.5, par: velocidade(d) > velocidade(a) ? 0.9 : 0.5, psn: 0.6, tox: 0.8, slp: 1.3, frz: 0.6, conf: 0.5 }[g.st[0]] || 0;
+      v += melhor * f;
+    }
+    var falta = 1 - a.hp / a.hpMax, cura = g.esp === 'cura-sol' || g.esp === 'cura-areia' ? 50 : g.cura;
+    if (cura && falta > 0.45) { v += melhor * falta * 2.2 * cura / 50; }
+    if (g.esp === 'rest' && a.hp / a.hpMax < 0.4 && !a.estado && podeDormirRest(a)) { v += melhor * 1.4; }
+    var alvo = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice', 't-eletrico': 'electric', 't-planta': 'grass', 't-psiquico': 'psychic' }[g.esp];
+    var ativoJa = g.esp && (a.campo && (a.campo.clima === g.esp || 't-' + a.campo.terreno === g.esp));
+    if (alvo && !ativoJa && a.golpes.some(function (x) { return x.c !== 'S' && x.t === alvo; })) { v += melhor * 0.6; }
+    return v * (g.ac ? g.ac / 100 : 1);
   }
   /* o alvo absorveu o golpe com a habilidade */
   function absorver(d, slug, P) {
@@ -912,8 +1010,9 @@
   }
   function iaGolpe(a, d) {
     var rapido = velocidade(a) >= velocidade(d), melhor = golpesDisponiveis(a)[0], nota = -1;
+    var melhorDano = Math.max.apply(null, golpesDisponiveis(a).map(function (i) { return esperado(a, d, a.golpes[i]); }).concat([0]));
     golpesDisponiveis(a).forEach(function (i) {
-      var g = a.golpes[i], v = esperado(a, d, g);
+      var g = a.golpes[i], v = g.c === 'S' ? valorEstadoIA(a, d, g, melhorDano) : esperado(a, d, g);
       if (g.pr > 0 && !rapido && v >= d.hp) { v += 1000; }
       if (baixaPropria(g) && v < d.hp) { v *= 0.8; }
       v *= 0.9 + Math.random() * 0.2;
@@ -975,6 +1074,7 @@
         }
         var uso = golpeEfetivo(a, ac.idx, d);
         if (uso.descansa) { continue; }
+        if (uso.g.c === 'S') { usarEstado(a, d, uso.g, []); continue; }
         var r = calcular(a, d, uso.g), antes = d.hp;
         d.hp = Math.max(0, d.hp - r.dano);
         efeitosDepois(a, d, uso.g, r, antes - d.hp, uso.idx);
@@ -1002,13 +1102,13 @@
   /* ================= ESTADO ================= */
   /* fotografia da batalha local (só entre turnos): Pokémon por id, com HP, forma e golpes */
   function fotoLutador(m) {
-    return { pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
+    return { fv: 3, pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
       nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, turnos: m.turnos,
       nat: m.nat, hab: m.hab, habBase: m.habBase, habPos: m.habPos, novo: m.novo, flash: m.flash, disfarce: m.disfarce, usouEntrada: m.usouEntrada,
       estado: m.estado, sono: m.sono, toxN: m.toxN, conf: m.conf, recuar: m.recuar };
   }
   function lutadorDaFoto(f) {
-    var p = P[f.pid]; if (!p || !f.nv || !f.pp || f.nat == null || f.hab == null) { return null; }
+    var p = P[f.pid]; if (!p || f.fv !== 3 || !f.nv || !f.pp || f.nat == null || f.hab == null) { return null; }
     return { p: p, nv: f.nv, nat: f.nat, st: statusDe(p.b, f.nv, f.nat), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
       pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, turnos: f.turnos || 0,
       hab: f.hab, habBase: f.habBase || f.hab, habPos: f.habPos || 0, novo: !!f.novo, flash: !!f.flash, disfarce: !!f.disfarce, usouEntrada: !!f.usouEntrada,
@@ -1026,6 +1126,7 @@
   if (!window.__arena) {
     var salvo = K.restaurar('arena', 72);
     if (salvo && salvo.versao === D.v) {
+      salvo.mv = { j: converterMv(salvo.mv && salvo.mv.j), o: converterMv(salvo.mv && salvo.mv.o) };
       salvo.B = salvo.foto ? batalhaDaFoto(salvo.foto) : null;
       if (!salvo.B && salvo.tela === 'batalha') { salvo.tela = 'selecao'; }
       Object.assign(salvo, { ocupado: false, auto: false, sim: null, previa: null, foto: null, ge: null, online: false, on: null });
@@ -1224,7 +1325,7 @@
   /* ================= EDITOR DE GOLPES ================= */
   function extrasHtml(p, g) {
     var x = [];
-    if (p.t.indexOf(g.t) >= 0) { x.push("<i class='ge-stab'>STAB</i>"); }
+    if (p.t.indexOf(g.t) >= 0 && g.c !== 'S') { x.push("<i class='ge-stab'>STAB</i>"); }
     if (g.pr > 0) { x.push(`<i>⚡ prioridade +${g.pr}</i>`); }
     if (g.hmax > 1) { x.push(`<i>${g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax} acertos</i>`); }
     if (g.dr > 0) { x.push(`<i>drena ${g.dr}%</i>`); }
@@ -1233,6 +1334,11 @@
     if (g.ca === 2) { x.push('<i>sempre crítico</i>'); }
     if (g.st) { x.push(`<i class='ge-st'>${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}</i>`); }
     if (g.fl) { x.push(`<i>${g.fl}% recuar</i>`); }
+    if (g.c === 'S') {
+      if (g.ef) { x.push(`<i>${(g.ef[0] === 'u' ? 'em si: ' : 'no alvo: ') + g.ef[2].map(function (y) { return CURTO_ATR[y[0]] + ' ' + (y[1] > 0 ? '+' : '') + y[1]; }).join(' ')}</i>`); }
+      if (g.cura) { x.push(`<i>recupera ${g.cura}%</i>`); }
+      if (TXT_ESP[g.esp]) { x.push(`<i>${TXT_ESP[g.esp].slice(3)}</i>`); }
+    }
     return x.join('');
   }
   function geCandidatos() {
@@ -1247,8 +1353,8 @@
     return lista.map(function (g) {
       var on = S.ge.ids.indexOf(g.id) >= 0;
       return `<div class='ge-g${on ? ' on' : ''}${cheio && !on ? ' cheio' : ''}' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>
-        ${icone(g.t, 22)}<b>${esc(g.nome)}</b><span class='ge-cat'>${g.c === 'F' ? 'Físico' : 'Especial'}</span>
-        <span class='ge-num'>${g.pw}</span><span class='ge-num'>${g.ac ? g.ac + '%' : '—'}</span><em>${extrasHtml(p, g)}</em></div>`;
+        ${icone(g.t, 22)}<b>${esc(g.nome)}</b><span class='ge-cat'>${g.c === 'F' ? 'Físico' : g.c === 'E' ? 'Especial' : 'Estado'}</span>
+        <span class='ge-num'>${g.c === 'S' ? '—' : g.pw}</span><span class='ge-num'>${g.ac ? g.ac + '%' : '—'}</span><em>${extrasHtml(p, g)}</em></div>`;
     }).join('');
   }
   function editorHtml() {
@@ -1257,20 +1363,20 @@
     tipos.sort(function (a, b) { return K.TIPOS.indexOf(a) - K.TIPOS.indexOf(b); });
     var slots = [0, 1, 2, 3].map(function (i) {
       var g = GR[S.ge.ids[i]];
-      return g ? `<div class='ge-sl' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>${icone(g.t, 20)}<b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · ${g.pw}</span><i>×</i></div>`
+      return g ? `<div class='ge-sl' data-acao='geToggle' data-g='${g.id}' style='--c:${corTipo(g.t)}'>${icone(g.t, 20)}<b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico · ' + g.pw : g.c === 'E' ? 'Especial · ' + g.pw : 'Estado'}</span><i>×</i></div>`
         : `<div class='ge-sl vazio'><span>Golpe ${i + 1}</span></div>`;
     }).join('');
     var chips = `<span class='gc${S.ge.tipo ? '' : ' on'}' data-acao='geTipo' data-t=''>Todos</span>` + tipos.map(function (t) {
       return `<span class='tc${S.ge.tipo === t ? ' on' : ''}' data-acao='geTipo' data-t='${t}' title='${nomeTipo(t)}' style='--c:${corTipo(t)}'>${icone(t, 20)}</span>`;
     }).join('');
-    var cats = [['', 'Todos'], ['F', 'Físicos'], ['E', 'Especiais']].map(function (c) {
+    var cats = [['', 'Todos'], ['F', 'Físicos'], ['E', 'Especiais'], ['S', 'Estado']].map(function (c) {
       return `<span class='gc${S.ge.cat === c[0] ? ' on' : ''}' data-acao='geCat' data-c='${c[0]}'>${c[1]}</span>`;
     }).join('');
     var aba = S.ge.aba === 'nat';
     var abas = `<div class='ge-abas'><span class='${aba ? '' : 'on'}' data-acao='geAba' data-a='golpes'>⚔ Golpes</span><span class='${aba ? 'on' : ''}' data-acao='geAba' data-a='nat'>✦ Nature e habilidade</span></div>`;
     var topo = `<div class='ge-topo'><div class='ge-arte'>${K.img([K.URL.home(p.id), K.URL.sprite(p.id)])}</div>
         <div class='ge-tit'><b>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div>
-        <span>Nv. ${nivelDe(p)} · Ataque ${p.b.atk} · Atq. Esp. ${p.b.spa} · ${todos.length} golpes de dano</span></div>
+        <span>Nv. ${nivelDe(p)} · Ataque ${p.b.atk} · Atq. Esp. ${p.b.spa} · ${todos.length} golpes</span></div>
         ${abas}<div class='bt bt-sec ge-x' data-acao='geFechar'>✕</div></div>`;
     if (aba) {
       return `<div class='ge'><div class='ge-box' style='--c:${corTipo(p.t[0])}'>${topo}${natHabHtml(p)}
@@ -1392,14 +1498,22 @@
     return golpesVisiveis().map(function (g, i) {
       var semPP = !(eu.pp[i] > 0), bloqueado = eu.preso && eu.preso.idx !== i;
       var e = efTotal(g.t, foe.p);
-      var tag = e === 0 ? ['nul', 'sem efeito'] : e >= 2 ? ['sup', 'super efetivo ×' + e] : e < 1 ? ['pou', 'pouco efetivo ×' + K.fmtEf(e)] : ['nor', 'normal'];
+      var tag = g.c === 'S' ? (falhaEstado(eu, foe, g) ? ['nul', 'sem efeito'] : ['est', alvoAdversario(g) ? 'no adversário' : 'em si']) :
+        e === 0 ? ['nul', 'sem efeito'] : e >= 2 ? ['sup', 'super efetivo ×' + e] : e < 1 ? ['pou', 'pouco efetivo ×' + K.fmtEf(e)] : ['nor', 'normal'];
+      var desc = g.c === 'S' ? `Estado · ${g.ac ? g.ac + '%' : 'nunca falha'}${prioGolpe(eu, g) > 0 ? ' · ⚡ prioridade' : ''}${efeitoTexto(g)}` : null;
       return `<div class='gp${trava || semPP || bloqueado ? ' off' : ''}${eu.preso && !bloqueado ? ' preso' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
         <div class='gp-ico'>${icone(g.t, 30)}</div><small class='gp-pp${eu.pp[i] <= 2 ? ' pouco' : ''}'>PP ${eu.pp[i]}/${g.pp || 10}</small>
-        <div class='gp-tx'><b>${eu.preso && !bloqueado ? '🔒 ' : ''}${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.esp === 'hp' ? poderDe(eu, g) + ' (cai com o HP)' : g.pw}${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}${efeitoTexto(g)}${g.esp === 'furia' ? ' · prende 2-3 turnos' : ''}</span></div>
+        <div class='gp-tx'><b>${eu.preso && !bloqueado ? '🔒 ' : ''}${esc(g.nome)}</b><span>${desc != null ? desc : `${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.esp === 'hp' ? poderDe(eu, g) + ' (cai com o HP)' : g.pw}`}${desc != null ? '' : `${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}${efeitoTexto(g)}${g.esp === 'furia' ? ' · prende 2-3 turnos' : ''}`}</span></div>
         <em class='ef ef-${tag[0]}'>${tag[1]}</em></div>`;
     }).join('');
   }
+  var TXT_ESP = { sol: ' · sol por 5 turnos', chuva: ' · chuva por 5 turnos', areia: ' · tempestade de areia por 5 turnos', neve: ' · neve por 5 turnos',
+    't-eletrico': ' · terreno Elétrico', 't-planta': ' · terreno de Planta', 't-psiquico': ' · terreno Psíquico', 't-nevoa': ' · terreno de Névoa',
+    rest: ' · dorme 2 turnos e recupera tudo', 'cura-sol': ' · recupera 50% (mais com sol)', 'cura-areia': ' · recupera 50% (mais com areia)' };
   function efeitoTexto(g) {
+    if (g.c === 'S') {
+      return (g.ef ? efeitoEstagios(g).replace(' (100%)', '') : '') + (g.st ? ` · ${VERBO_EST[g.st[0]]}` : '') + (g.cura ? ` · recupera ${g.cura}% do HP` : '') + (TXT_ESP[g.esp] || '');
+    }
     var extra = (g.st ? ` · ${g.st[1] >= 100 ? '' : g.st[1] + '% '}${VERBO_EST[g.st[0]]}` : '') + (g.fl ? ` · ${g.fl}% recuar` : '') +
       (g.nome === 'Facade' ? ' · ×2 com estado próprio' : '') + (g.nome === 'Hex' || g.nome === 'Infernal Parade' ? ' · ×2 se o alvo tiver estado' : '') +
       (g.nome === 'Venoshock' || g.nome === 'Barb Barrage' ? ' · ×2 se o alvo estiver envenenado' : '');
@@ -1614,6 +1728,11 @@
     mensagem(`<b>${quem}</b> usou <span style='color:${corTipo(g.t)}'>${esc(g.nome)}</span>!`);
     registrar(`<b>${esc(a.p.nome)}</b> usou <span style='color:${corTipo(g.t)}'>${esc(g.nome)}</span>`);
     await esperar(350);
+    if (g.c === 'S') {
+      if (alvoAdversario(g)) { await animarAtaque(lado, foe, g); } else { var eu0 = $('mon-' + lado); if (eu0) { eu0.classList.remove('entra'); void eu0.offsetWidth; eu0.classList.add('entra'); } await esperar(400); }
+      var PE = []; usarEstado(a, d, g, PE); await mostrarPassos(PE); atualizarHud(); await esperar(300);
+      return false;
+    }
     await animarAtaque(lado, foe, g);
     var r = calcular(a, d, g);
     if (r.erro || r.ef === 0) {
@@ -1985,15 +2104,8 @@
     ids.forEach(function (id) { if (mv[id]) { out[id] = mv[id].slice(0, 4); } });
     return out;
   }
-  /* golpes recebidos do outro lado: só índices válidos */
-  function limparGolpes(mv) {
-    var out = {};
-    Object.keys(mv || {}).forEach(function (id) {
-      var l = (mv[id] || []).filter(function (i) { return typeof i === 'number' && GR[i]; }).slice(0, 4);
-      if (l.length) { out[id] = l; }
-    });
-    return out;
-  }
+  /* golpes recebidos do outro lado: nomes válidos (números de versões antigas são convertidos) */
+  function limparGolpes(mv) { return converterMv(mv); }
   function ligadoOuAusente() { return NET && (NET.estado === 'ligado' || NET.estado === 'ausente'); }
   function caiu() { return NET && (NET.estado === 'caiu' || NET.estado === 'erro' || NET.estado === 'off'); }
   function limparItens(it) {
@@ -2133,7 +2245,7 @@
       case 'geHab': S.ge.hab = +el.getAttribute('data-h'); render(); break;
       case 'geNatAuto': S.ge.nat = null; S.ge.hab = null; render(); break;
       case 'geOk':
-        if (S.ge.ids.length) { S.mv[S.ge.lado][S.ge.id] = S.ge.ids.slice(); }
+        if (S.ge.ids.length) { S.mv[S.ge.lado][S.ge.id] = S.ge.ids.map(function (i) { return GR[i].nome; }); }
         if (S.ge.nat != null) { S.nat[S.ge.lado][S.ge.id] = S.ge.nat; } else { delete S.nat[S.ge.lado][S.ge.id]; }
         if (S.ge.hab != null) { S.hab[S.ge.lado][S.ge.id] = S.ge.hab; } else { delete S.hab[S.ge.lado][S.ge.id]; }
         if (S.online && S.ge.lado === 'j') { S.on.pronto = false; S.ge = null; enviarTime(); }
@@ -2189,7 +2301,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, fimTurnoEstado: fimTurnoEstado, usarEstado: usarEstado, valorEstadoIA: valorEstadoIA, golpesAuto: golpesAuto, converterMv: converterMv, GR_NOME: GR_NOME, aplicarEstado: aplicarEstado, antesDeAgir: antesDeAgir, efeitosDepois: efeitosDepois, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
