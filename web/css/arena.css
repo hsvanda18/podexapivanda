@@ -430,3 +430,19 @@
 @keyframes clima-chuva { to { background-position: 0 0, -80px 300px; } }
 @keyframes clima-areia { to { background-position: 0 0, 400px 56px; } }
 @keyframes clima-neve { to { background-position: 0 0, 30px 180px, -20px 110px; } }
+
+/* ---------- terrenos ---------- */
+.clima-tag { display: flex; gap: 6px; }
+.clima-tag span.terreno-tag.eletrico { border-color: rgba(250,214,40,.6); }
+.clima-tag span.terreno-tag.planta { border-color: rgba(120,200,80,.6); }
+.clima-tag span.terreno-tag.psiquico { border-color: rgba(248,88,136,.6); }
+.clima-tag span.terreno-tag.nevoa { border-color: rgba(238,153,172,.6); }
+.terreno-fx { position: absolute; left: 0; right: 0; bottom: 0; height: 62%; pointer-events: none; opacity: 0; transition: opacity .6s; -webkit-mask-image: linear-gradient(transparent, #000 45%); mask-image: linear-gradient(transparent, #000 45%); }
+.terreno-fx.eletrico, .terreno-fx.planta, .terreno-fx.psiquico, .terreno-fx.nevoa { opacity: 1; }
+.terreno-fx.eletrico { background: linear-gradient(rgba(250,214,40,.22), rgba(250,214,40,.22)), repeating-linear-gradient(75deg, transparent 0 40px, rgba(255,240,120,.45) 40px 42px, transparent 42px 90px); background-size: auto, 300px 300px; animation: terreno-el 0.9s steps(4) infinite; }
+.terreno-fx.planta { background: linear-gradient(rgba(90,190,70,.26), rgba(90,190,70,.26)), repeating-linear-gradient(90deg, transparent 0 9px, rgba(140,230,100,.35) 9px 11px, transparent 11px 23px); animation: terreno-pulso 3s ease-in-out infinite alternate; }
+.terreno-fx.psiquico { background: linear-gradient(rgba(220,80,200,.24), rgba(120,80,220,.24)), radial-gradient(circle, rgba(255,160,240,.5) 2px, transparent 3px); background-size: auto, 60px 60px; animation: terreno-psi 5s linear infinite; }
+.terreno-fx.nevoa { background: radial-gradient(ellipse at 30% 80%, rgba(255,190,220,.45), transparent 60%), radial-gradient(ellipse at 75% 70%, rgba(255,210,235,.4), transparent 55%); animation: terreno-pulso 4s ease-in-out infinite alternate; }
+@keyframes terreno-el { to { background-position: 0 0, 300px 0; } }
+@keyframes terreno-psi { to { background-position: 0 0, 60px -60px; } }
+@keyframes terreno-pulso { from { opacity: .65; } to { opacity: 1; } }

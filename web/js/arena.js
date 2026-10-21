@@ -29,7 +29,7 @@
     return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9],
       pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '' };
   }) : [];
-  var VERSAO = D.v + '.' + GR.length + '.r4';
+  var VERSAO = D.v + '.' + GR.length + '.r5';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -147,7 +147,15 @@
     'mold-breaker': [4, 'ignora as habilidades defensivas do alvo'], 'teravolt': [4, 'ignora as habilidades defensivas do alvo'], 'turboblaze': [4, 'ignora as habilidades defensivas do alvo'],
     'steelworker': [4, 'golpes de Aço ×1,5'], 'steely-spirit': [4, 'golpes de Aço ×1,5'], 'dragons-maw': [4, 'golpes de Dragão ×1,5'],
     'transistor': [4, 'golpes Elétrico ×1,3'], 'rocky-payload': [4, 'golpes de Pedra ×1,5'], 'water-bubble': [8, 'golpes de Água ×2; Fogo recebido ×0,5'],
-    'orichalcum-pulse': [7, 'ao entrar: sol por 5 turnos; com sol, Ataque ×1,33'], 'hadron-engine': [6, 'Atq. Esp. ×1,33'],
+    'orichalcum-pulse': [7, 'ao entrar: sol por 5 turnos; com sol, Ataque ×1,33'], 'hadron-engine': [7, 'ao entrar: terreno Elétrico por 5 turnos; com ele, Atq. Esp. ×1,33'],
+    'electric-surge': [5, 'ao entrar: terreno Elétrico por 5 turnos (golpes Elétrico ×1,3)'],
+    'grassy-surge': [5, 'ao entrar: terreno de Planta por 5 turnos (Planta ×1,3, cura 1/16 por turno, Earthquake a metade)'],
+    'psychic-surge': [5, 'ao entrar: terreno Psíquico por 5 turnos (Psíquico ×1,3, protege de golpes com prioridade)'],
+    'misty-surge': [5, 'ao entrar: terreno de Névoa por 5 turnos (golpes de Dragão recebidos a metade)'],
+    'seed-sower': [3, 'quando é atingido: terreno de Planta por 5 turnos'],
+    'quark-drive': [3, 'com terreno Elétrico, o melhor atributo ×1,3 (Velocidade ×1,5)'],
+    'surge-surfer': [2, 'com terreno Elétrico, Velocidade ×2'], 'grass-pelt': [2, 'com terreno de Planta, Defesa ×1,5'],
+    'mimicry': [2, 'muda para o tipo do terreno (Elétrico, Planta, Psíquico ou Fada)'],
     'drought': [5, 'ao entrar: sol por 5 turnos (Fogo ×1,5, Água ×0,5)'], 'drizzle': [5, 'ao entrar: chuva por 5 turnos (Água ×1,5, Fogo ×0,5)'],
     'sand-stream': [4, 'ao entrar: tempestade de areia por 5 turnos (fere 1/16 por turno quem não é Pedra, Terra ou Aço; Pedra com Def. Esp. ×1,5)'],
     'snow-warning': [4, 'ao entrar: neve por 5 turnos (Gelo com Defesa ×1,5)'], 'sand-spit': [3, 'quando é atingido: tempestade de areia por 5 turnos'],
@@ -255,7 +263,7 @@
   var BOLA = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice' };
   var TEMPESTADE = /^(Thunder|Hurricane|Bleakwind Storm|Wildbolt Storm|Sandsear Storm)$/;
   function ligarCampo(B, c) {
-    B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, B: B };
+    B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, terreno: (c && c.terreno) || null, tturnos: (c && c.tturnos) || 0, B: B };
     ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.campo = B.campo; }); });
     return B;
   }
@@ -265,6 +273,38 @@
     var B = c.B;
     if (B && ['j', 'o'].some(function (l) { var x = ativo(B[l]), h = hab(x); return x.hp > 0 && (h === 'cloud-nine' || h === 'air-lock'); })) { return ''; }
     return c.clima;
+  }
+  /* ---------- terrenos: Elétrico, Planta, Psíquico e Névoa, 5 turnos; só afetam quem está no chão ---------- */
+  var TERRENO_DE = { 'electric-surge': 'eletrico', 'hadron-engine': 'eletrico', 'grassy-surge': 'planta', 'psychic-surge': 'psiquico', 'misty-surge': 'nevoa' };
+  var NOME_TERRENO = { eletrico: '⚡ Terreno Elétrico', planta: '🌿 Terreno de Planta', psiquico: '🔮 Terreno Psíquico', nevoa: '🌸 Terreno de Névoa' };
+  var TXT_TERRENO = { eletrico: 'Uma corrente elétrica percorre o campo!', planta: 'A relva cresceu por todo o campo!', psiquico: 'O campo ficou estranho!', nevoa: 'Uma névoa cobriu o campo!' };
+  var FIM_TERRENO = { eletrico: 'A corrente elétrica desapareceu.', planta: 'A relva desapareceu.', psiquico: 'O campo voltou ao normal.', nevoa: 'A névoa desapareceu.' };
+  var TIPO_TERRENO = { eletrico: 'electric', planta: 'grass', psiquico: 'psychic', nevoa: 'fairy' };
+  function terreno(m) { return (m && m.campo && m.campo.terreno) || ''; }
+  /* tipos em campo (Mimicry muda para o tipo do terreno) */
+  function tiposDe(m) { return hab(m) === 'mimicry' && terreno(m) ? [TIPO_TERRENO[terreno(m)]] : m.p.t; }
+  function noChao(m) { return tiposDe(m).indexOf('flying') < 0 && hab(m) !== 'levitate'; }
+  function mudarTerreno(m, tipo, P) {
+    var c = m.campo; if (!c || c.terreno === tipo) { return false; }
+    c.terreno = tipo; c.tturnos = 5; P.push({ tipo: 'txt', txt: TXT_TERRENO[tipo] }); return true;
+  }
+  function multTerreno(a, d, g, t) {
+    var tr = terreno(a), m = 1; if (!tr || g.semTipo) { return m; }
+    if (noChao(a) && ((tr === 'eletrico' && t === 'electric') || (tr === 'planta' && t === 'grass') || (tr === 'psiquico' && t === 'psychic'))) { m *= 1.3; }
+    if (tr === 'planta' && noChao(d) && (g.nome === 'Earthquake' || g.nome === 'Bulldoze')) { m *= 0.5; }
+    if (tr === 'nevoa' && noChao(d) && t === 'dragon') { m *= 0.5; }
+    if (tr === 'eletrico' && g.nome === 'Psyblade') { m *= 1.5; }
+    return m;
+  }
+  /* fim do turno: o terreno de Planta cura quem está no chão; contagem dos turnos */
+  function fimTurnoTerreno(B, lados) {
+    var P = [], c = B.campo; if (!c || !c.terreno) { return P; }
+    if (c.terreno === 'planta') {
+      lados.forEach(function (l) { var m = ativo(B[l]); if (m.hp > 0 && m.hp < m.hpMax && noChao(m)) { mexerHp(m, Math.max(1, Math.floor(m.hpMax / 16)), `<b>${esc(m.p.nome)}</b> recuperou {x} HP com a relva.`, P); } });
+    }
+    c.tturnos--;
+    if (c.tturnos <= 0) { P.push({ tipo: 'txt', txt: FIM_TERRENO[c.terreno] }); c.terreno = null; c.tturnos = 0; }
+    return P;
   }
   function mudarClima(m, tipo, P) {
     var c = m.campo; if (!c || c.clima === tipo) { return false; }
@@ -280,7 +320,7 @@
   function melhorAtr(m) { return ['atk', 'def', 'spa', 'spd', 'spe'].reduce(function (x, y) { return m.st[y] > m.st[x] ? y : x; }, 'atk'); }
   function imuneAreia(m) {
     var h = hab(m);
-    return m.p.t.some(function (t) { return t === 'rock' || t === 'ground' || t === 'steel'; }) || h === 'sand-veil' || h === 'sand-rush' || h === 'sand-force' || h === 'overcoat' || h === 'magic-guard';
+    return tiposDe(m).some(function (t) { return t === 'rock' || t === 'ground' || t === 'steel'; }) || h === 'sand-veil' || h === 'sand-rush' || h === 'sand-force' || h === 'overcoat' || h === 'magic-guard';
   }
   /* fim do turno: dano e cura do clima, pela ordem dos lados, e contagem dos turnos */
   function fimTurnoClima(B, lados) {
@@ -333,16 +373,22 @@
     var cl = clima(m);
     if (cl) {
       if (k === 'spe' && CORRE[h] === cl) { v *= 2; }
-      if (!atacando && k === 'def' && cl === 'neve' && m.p.t.indexOf('ice') >= 0) { v *= 1.5; }
-      if (!atacando && k === 'spd' && cl === 'areia' && m.p.t.indexOf('rock') >= 0) { v *= 1.5; }
+      if (!atacando && k === 'def' && cl === 'neve' && tiposDe(m).indexOf('ice') >= 0) { v *= 1.5; }
+      if (!atacando && k === 'spd' && cl === 'areia' && tiposDe(m).indexOf('rock') >= 0) { v *= 1.5; }
       if (cl === 'sol' && h === 'flower-gift' && ((atacando && k === 'atk') || (!atacando && k === 'spd'))) { v *= 1.5; }
       if (cl === 'sol' && atacando && k === 'spa' && h === 'solar-power') { v *= 1.5; }
       if (cl === 'sol' && h === 'protosynthesis' && melhorAtr(m) === k) { v *= k === 'spe' ? 1.5 : 1.3; }
     }
+    var tr = terreno(m);
+    if (tr === 'eletrico') {
+      if (h === 'quark-drive' && melhorAtr(m) === k) { v *= k === 'spe' ? 1.5 : 1.3; }
+      if (h === 'surge-surfer' && k === 'spe') { v *= 2; }
+    }
+    if (tr === 'planta' && h === 'grass-pelt' && !atacando && k === 'def') { v *= 1.5; }
     if (atacando) {
       if (k === 'atk' && (h === 'huge-power' || h === 'pure-power')) { v *= 2; }
       if (k === 'atk' && h === 'hustle') { v *= 1.5; }
-      if ((k === 'atk' && h === 'orichalcum-pulse' && cl === 'sol') || (k === 'spa' && h === 'hadron-engine')) { v *= 4 / 3; }
+      if ((k === 'atk' && h === 'orichalcum-pulse' && cl === 'sol') || (k === 'spa' && h === 'hadron-engine' && tr === 'eletrico')) { v *= 4 / 3; }
       if (h === 'defeatist' && m.hp * 2 < m.hpMax) { v *= 0.5; }
     }
     if (outro && RUINA[k] && hab(outro) === RUINA[k] && h !== RUINA[k]) { v *= 0.75; }
@@ -384,6 +430,8 @@
       anunciar(m, P); m.hab = hab(foe); P.push({ tipo: 'txt', txt: `<b>${esc(m.p.nome)}</b> copiou ${esc(nomeHab(m.hab))}!` }); h = m.hab;
     }
     if (CLIMA_DE[h] && m.campo && m.campo.clima !== CLIMA_DE[h]) { anunciar(m, P); mudarClima(m, CLIMA_DE[h], P); }
+    if (TERRENO_DE[h] && m.campo && m.campo.terreno !== TERRENO_DE[h]) { anunciar(m, P); mudarTerreno(m, TERRENO_DE[h], P); }
+    if (h === 'mimicry' && terreno(m)) { anunciar(m, P); P.push({ tipo: 'txt', txt: `<b>${esc(m.p.nome)}</b> passou a ser do tipo ${nomeTipo(TIPO_TERRENO[terreno(m)])}.` }); }
     if ((h === 'cloud-nine' || h === 'air-lock') && m.campo && m.campo.clima) { anunciar(m, P); P.push({ tipo: 'txt', txt: 'Os efeitos do clima desapareceram.' }); }
     if (h === 'intimidate' && foe && foe.hp > 0) {
       anunciar(m, P);
@@ -453,34 +501,36 @@
 
   /* ---------- dano ---------- */
   function efTotal(tipo, alvo) { return K.efTotal(tipo, alvo.t); }
-  function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.nome === 'Weather Ball' && clima(a) ? 100 : g.pw; }
+  function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.nome === 'Weather Ball' && clima(a) ? 100 : g.nome === 'Terrain Pulse' && terreno(a) && noChao(a) ? 100 : g.pw; }
   /* tipo do golpe depois das habilidades (Pixilate, Liquid Voice...) */
   function tipoDe(a, g) {
     if (g.semTipo || g.max) { return g.t; }
     var h = hab(a);
     if (g.nome === 'Weather Ball' && clima(a)) { return BOLA[clima(a)]; }
+    if (g.nome === 'Terrain Pulse' && terreno(a) && noChao(a)) { return TIPO_TERRENO[terreno(a)]; }
     if (PELE[h] && g.t === 'normal') { return PELE[h]; }
     if (h === 'liquid-voice' && SOM.test(g.nome)) { return 'water'; }
     return g.t;
   }
   function efetividade(a, d, g, t) {
     if (g.semTipo) { return 1; }
-    var tipos = d.p.t;
+    var tipos = tiposDe(d);
     if (hab(a) === 'scrappy' && (t === 'normal' || t === 'fighting')) { tipos = tipos.filter(function (x) { return x !== 'ghost'; }); }
     return K.efTotal(t, tipos);
   }
   function stabDe(a, g, t) {
     if (g.semTipo) { return 1; }
     var h = hab(a);
-    if (a.p.t.indexOf(t) < 0 && h !== 'protean' && h !== 'libero') { return 1; }
+    if (tiposDe(a).indexOf(t) < 0 && h !== 'protean' && h !== 'libero') { return 1; }
     return h === 'adaptability' ? 2 : 1.5;
   }
   function prioGolpe(m, g) {
     var h = hab(m), t = tipoDe(m, g);
-    return (g.pr || 0) + (h === 'gale-wings' && t === 'flying' && m.hp === m.hpMax ? 1 : 0) + (h === 'triage' && g.dr > 0 ? 3 : 0);
+    return (g.pr || 0) + (g.nome === 'Grassy Glide' && terreno(m) === 'planta' && noChao(m) ? 1 : 0) + (h === 'gale-wings' && t === 'flying' && m.hp === m.hpMax ? 1 : 0) + (h === 'triage' && g.dr > 0 ? 3 : 0);
   }
   /* imunidades por habilidade: devolve a habilidade que bloqueou */
   function bloqueio(a, d, g, t, e) {
+    if (terreno(d) === 'psiquico' && noChao(d) && !g.luta && prioGolpe(a, g) > 0) { return 'terreno'; }
     var h = habAlvo(a, d);
     if (!h || g.luta) { return ''; }
     if (ABSORVE[h] === t) { return h; }
@@ -553,7 +603,7 @@
       var r = rng();
       acertos = hab(a) === 'skill-link' ? g.hmax : g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
     }
-    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao * multHab(a, d, g, t, e, crit) * multClima(a, g, t))) * acertos;
+    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao * multHab(a, d, g, t, e, crit) * multClima(a, g, t) * multTerreno(a, d, g, t))) * acertos;
     var res = { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos, t: t };
     // Disguise / Ice Face: o primeiro golpe não faz (quase) dano; Sturdy: aguenta com 1 HP
     if (dano > 0 && !d.disfarce && (hd === 'disguise' || (hd === 'ice-face' && g.c === 'F'))) {
@@ -567,7 +617,7 @@
     var h = hab(a), nc = Math.min(2, (g.ca || 0) + (h === 'super-luck' ? 1 : 0)), hd = habAlvo(a, d);
     var pc = hd === 'battle-armor' || hd === 'shell-armor' ? 0 : g.ca === 2 ? 1 : CHANCE_CRIT[nc], critMedio = 1 + pc * (h === 'sniper' ? 1.25 : 0.5);
     var ac = precisaoDe(a, d, g), hits = g.hmax > 1 && h === 'skill-link' ? g.hmax : acertosMedios(g);
-    return danoBase(a, d, g, false) * stabDe(a, g, t) * e * (ac === 0 ? 1 : Math.min(1, ac / 100)) * hits * critMedio * 0.925 * multHab(a, d, g, t, e, false) * multClima(a, g, t);
+    return danoBase(a, d, g, false) * stabDe(a, g, t) * e * (ac === 0 ? 1 : Math.min(1, ac / 100)) * hits * critMedio * 0.925 * multHab(a, d, g, t, e, false) * multClima(a, g, t) * multTerreno(a, d, g, t);
   }
   /* dreno (cura quem atacou; Liquid Ooze fere) e recuo (fere quem atacou, sem o derrubar) */
   function efeitoDreno(a, d, g, causado, P) {
@@ -594,6 +644,7 @@
   }
   /* o alvo absorveu o golpe com a habilidade */
   function absorver(d, slug, P) {
+    if (slug === 'terreno') { P.push({ tipo: 'txt', txt: `O terreno psíquico protegeu <b>${esc(d.p.nome)}</b>!` }); return; }
     anunciar(d, P);
     var cura = function () { if (!mexerHp(d, Math.floor(d.hpMax / 4), `<b>${esc(d.p.nome)}</b> recuperou {x} HP.`, P)) { P.push({ tipo: 'txt', txt: `Não afeta <b>${esc(d.p.nome)}</b>.` }); } };
     switch (slug) {
@@ -624,6 +675,7 @@
       if (hd === 'cotton-down' && a.hp > 0) { anunciar(d, P); alterar(a, 'spe', -1, d, P); }
     }
     if (hd === 'sand-spit' && d.campo && d.campo.clima !== 'areia') { anunciar(d, P); mudarClima(d, 'areia', P); }
+    if (hd === 'seed-sower' && d.campo && d.campo.terreno !== 'planta') { anunciar(d, P); mudarTerreno(d, 'planta', P); }
     if (a.hp > 0 && hab(a) !== 'magic-guard') {
       if (g.c === 'F' && (hd === 'rough-skin' || hd === 'iron-barbs')) { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 8)), `<b>${esc(a.p.nome)}</b> magoou-se e perdeu {x} HP.`, P); }
       if (d.hp <= 0 && g.c === 'F' && hd === 'aftermath') { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 4)), `<b>${esc(a.p.nome)}</b> perdeu {x} HP.`, P); }
@@ -790,7 +842,7 @@
           break;
         }
       }
-      fimTurnoClima(B, ['j', 'o']); fimTurnoLado(B.j); fimTurnoLado(B.o);
+      fimTurnoClima(B, ['j', 'o']); fimTurnoTerreno(B, ['j', 'o']); fimTurnoLado(B.j); fimTurnoLado(B.o);
     }
     return { venc: vivos(B.j).length ? 'j' : 'o', turnos: turnos };
   }
@@ -815,7 +867,7 @@
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
-    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos } : null };
+    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos, terreno: B.campo.terreno, tturnos: B.campo.tturnos } : null };
   }
   function batalhaDaFoto(f) {
     var lado = function (l) { return { ativo: l.ativo, transformou: l.transformou, time: l.time.map(lutadorDaFoto) }; };
@@ -1237,7 +1289,7 @@
     return `<div class='pk-palco bat' id='ar-palco'>
       <div class='campo campo-o' style='--c:${corTipo(to)}'>${K.particulas(to, 18, 3)}</div>
       <div class='campo campo-j' style='--c:${corTipo(tj)}'>${K.particulas(tj, 18, 11)}</div>
-      <div class='campo-luz'></div><div class='clima-fx ${B.campo && B.campo.clima ? B.campo.clima : ''}' id='ar-clima-fx'></div><div class='diag'></div>
+      <div class='campo-luz'></div><div class='terreno-fx ${B.campo && B.campo.terreno ? B.campo.terreno : ''}' id='ar-terreno-fx'></div><div class='clima-fx ${B.campo && B.campo.clima ? B.campo.clima : ''}' id='ar-clima-fx'></div><div class='diag'></div>
       <div class='clima-tag' id='ar-clima'>${climaHtml()}</div>
       <div class='vs'><span>VS</span></div>
       <div class='plat plat-o' style='--c:${corTipo(to)}'></div><div class='plat plat-j' style='--c:${corTipo(tj)}'></div>
@@ -1435,13 +1487,16 @@
   /* mostra os passos das regras (habilidades, atributos, HP) um a um */
   function ladoDe(m) { return S.B.j.time.indexOf(m) >= 0 ? 'j' : 'o'; }
   function climaHtml() {
-    var c = S.B && S.B.campo; if (!c || !c.clima) { return ''; }
-    return `<span>${NOME_CLIMA[c.clima]} · ${c.turnos} ${c.turnos === 1 ? 'turno' : 'turnos'}${clima(ativo(S.B.j)) ? '' : ' · anulado'}</span>`;
+    var c = S.B && S.B.campo; if (!c) { return ''; }
+    var t = function (n) { return n + ' ' + (n === 1 ? 'turno' : 'turnos'); };
+    return (c.clima ? `<span>${NOME_CLIMA[c.clima]} · ${t(c.turnos)}${clima(ativo(S.B.j)) ? '' : ' · anulado'}</span>` : '') +
+      (c.terreno ? `<span class='terreno-tag ${c.terreno}'>${NOME_TERRENO[c.terreno]} · ${t(c.tturnos)}</span>` : '');
   }
   function atualizarHud() {
     var cx = $('ar-clima'), fx = $('ar-clima-fx');
     if (cx) { cx.innerHTML = climaHtml(); }
     if (fx) { fx.className = 'clima-fx ' + ((S.B.campo && S.B.campo.clima) || ''); }
+    var tf = $('ar-terreno-fx'); if (tf) { tf.className = 'terreno-fx ' + ((S.B.campo && S.B.campo.terreno) || ''); }
     var h = $('ar-palco'); if (!h) { return; }
     var est = h.querySelectorAll('.hud-est');
     if (est[0]) { est[0].innerHTML = estHtml(ativo(S.B.j)); } if (est[1]) { est[1].innerHTML = estHtml(ativo(S.B.o)); }
@@ -1554,6 +1609,7 @@
       if (ko) { if (await aposDesmaio(lado === 'j' ? 'o' : 'j')) { return; } break; }
     }
     await mostrarPassos(fimTurnoClima(B, ['j', 'o']));
+    await mostrarPassos(fimTurnoTerreno(B, ['j', 'o']));
     for (var lg of ['j', 'o']) {
       var mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
@@ -1630,6 +1686,7 @@
       if (ko) { if (await aposDesmaioOnline(lado === 'j' ? 'o' : 'j', n)) { fecharTurno(n); return; } break; }
     }
     await mostrarPassos(fimTurnoClima(B, lados));
+    await mostrarPassos(fimTurnoTerreno(B, lados));
     for (var g = 0; g < 2; g++) {
       var lg = lados[g], mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
@@ -1643,7 +1700,7 @@
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
       return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat; }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l]));
-    }).join('|') + '|' + (B.campo.clima || '-') + B.campo.turnos;
+    }).join('|') + '|' + (B.campo.clima || '-') + B.campo.turnos + '|' + (B.campo.terreno || '-') + B.campo.tturnos;
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
     conferirSync(n);
@@ -1954,7 +2011,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, fimTurnoTerreno: fimTurnoTerreno, tiposDe: tiposDe, prioGolpe: prioGolpe, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
