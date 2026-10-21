@@ -36,7 +36,7 @@
   function cliente() {
     if (!O.configurado) { return Promise.reject(new Error('O modo online ainda não foi configurado (falta o Supabase em js/config.js).')); }
     return carregarLib().then(function () {
-      if (!sb) { sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseChave, { auth: { persistSession: true, autoRefreshToken: true } }); }
+      if (!sb) { sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseChave, { auth: Object.assign({ persistSession: true, autoRefreshToken: true }, CFG.chaveSessao ? { storageKey: CFG.chaveSessao } : {}) }); }
       return sb.auth.getSession();
     }).then(function (r) {
       if (r.data && r.data.session) { return r.data.session.user; }
@@ -194,15 +194,18 @@
     }).catch(function (e) { guardarSala(''); avisar('erro', textoErro(e)); });
   };
   /* tenta de novo algumas vezes: uma jogada perdida pararia a batalha */
-  function gravar(fn, tentativas) {
+  function tentar(fn, tentativas) {
     return fn().then(function (r) {
       if (r && r.error) { throw r.error; }
       return r;
     }).catch(function (e) {
-      if ((tentativas || 0) < 3) { return new Promise(function (ok) { setTimeout(ok, 1500); }).then(function () { return gravar(fn, (tentativas || 0) + 1); }); }
+      if ((tentativas || 0) < 3) { return new Promise(function (ok) { setTimeout(ok, 1500); }).then(function () { return tentar(fn, (tentativas || 0) + 1); }); }
       console.warn('online: não gravou', e);
     });
   }
+  /* as gravações saem em fila, pela ordem em que foram feitas (senão uma mais antiga pode apagar a mais nova) */
+  var fila = Promise.resolve();
+  function gravar(fn) { fila = fila.then(function () { return tentar(fn); }); return fila; }
   O.enviar = function (m) {
     if (!at || !sb) { return false; }
     var c = at.codigo, eu = at.papel, mud = {};
