@@ -248,7 +248,7 @@ def montar_pokemon(raw):
             nomeEsp=e["nome"], forma=forma, tag=tag, alt=r["height"] / 10, peso=r["weight"] / 10,
             cat=e["cat"], desc=e["desc"], gen=e["gen"], chain=e["chain"], est=e["est"],
             ests=max_cadeia[e["chain"]], nivel=e["nivel"], lend=e["lend"], mit=e["mit"],
-            regiao=proper(regioes.get(e["gen"], "")), ordem=r["pokemon_species_id"] * 100000 + r["id"]))
+            regiao=proper(regioes.get(e["gen"], "")), ordem=r["pokemon_species_id"] * 100000 + r["id"], pai=e["pai"] or 0))
     out.sort(key=lambda p: p["ordem"])
 
     ef = {}
@@ -263,7 +263,7 @@ def montar_pokemon(raw):
     arena = {
         "v": len(out) * 1000 + len(gp),
         "pk": [[p["id"], p["nome"], p["esp"], p["t1"], p["t2"]] + [s or 1 for s in p["stats"]]
-               + [1 if p["padrao"] else 0, p["gen"] or 0, 1 if (p["lend"] or p["mit"]) else 0] for p in out],
+               + [1 if p["padrao"] else 0, p["gen"] or 0, 1 if (p["lend"] or p["mit"]) else 0, p["pai"]] for p in out],
         "ef": ef, "gp": gp, "tp": tp,
     }
     # window.DEX_DADOS: colunas extras da Pokédex, por id
@@ -310,8 +310,9 @@ def montar_cartas(raw):
 
 # ---------- golpes reais (Arena) ----------
 CONSULTA_GOLPES = (
-    "{ m: pokemon_v2_move(where:{power:{_gt:0}}) { id name power accuracy priority move_damage_class_id type_id "
-    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate } "
+    "{ m: pokemon_v2_move(where:{power:{_gt:0}}) { id name power accuracy priority pp move_damage_class_id type_id "
+    "meta: pokemon_v2_movemeta { min_hits max_hits drain crit_rate stat_chance move_meta_category_id } "
+    "sc: pokemon_v2_movemetastatchanges { change stat_id } "
     "n: pokemon_v2_movenames(where:{language_id:{_eq:9}}) { name } } "
     "p: pokemon_v2_pokemon(order_by:{id:asc}) { id ms: pokemon_v2_pokemonmoves(distinct_on: move_id) { move_id } } }"
 )
@@ -333,9 +334,18 @@ def golpes_raw():
     return baixar(GRAPHQL, json.dumps({"query": CONSULTA_GOLPES}).encode())["data"]
 
 
+# efeitos que a PokeAPI não descreve nos metadados
+EFEITOS_EXTRA = {"make-it-rain": ["u", 100, [["spa", -1]]]}
+# golpes com regra própria na Arena: 'hp' perde força com o HP de quem usa; 'furia' prende 2-3 turnos
+ESPECIAIS = {"eruption": "hp", "water-spout": "hp", "dragon-energy": "hp",
+             "outrage": "furia", "thrash": "furia", "petal-dance": "furia", "raging-fury": "furia"}
+STATS = {2: "atk", 3: "def", 4: "spa", 5: "spd", 6: "spe"}
+
+
 def montar_golpes(raw, poke):
     """window.GOLPES_DADOS: g = golpes [nome, tipo, F/E, poder, precisão (0 = nunca erra), prioridade,
-    acertos mín, acertos máx, dreno % (negativo = recuo), crítico (0 normal, 1 alto, 2 garantido)];
+    acertos mín, acertos máx, dreno % (negativo = recuo), crítico (0 normal, 1 alto, 2 garantido),
+    PP, efeito nos atributos [quem ('u' quem usa, 'a' alvo), chance %, [[atributo, estágios]...]] ou 0, especial ('hp', 'furia' ou '')];
     a = id do pokémon -> índices em g (formas sem lista usam a da forma padrão, no JS)."""
     tipo_id = {t["id"]: t["name"] for t in poke["t"]}
     aprendidos = {}
@@ -351,7 +361,8 @@ def montar_golpes(raw, poke):
         crit = meta.get("crit_rate") or 0
         golpes.append((m["id"], [nome, tipo_id[m["type_id"]], "F" if m["move_damage_class_id"] == 2 else "E", m["power"],
                                  m["accuracy"] or 0, m["priority"] or 0, meta.get("min_hits") or 1, meta.get("max_hits") or 1,
-                                 meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0]))
+                                 meta.get("drain") or 0, 2 if crit >= 3 else 1 if crit >= 1 else 0,
+                                 m.get("pp") or 10, efeito_atributos(m, meta), ESPECIAIS.get(m["name"], "")]))
     golpes.sort(key=lambda x: x[1][0])
     idx = {mid: i for i, (mid, _) in enumerate(golpes)}
     a = {}
@@ -360,6 +371,16 @@ def montar_golpes(raw, poke):
         if lista:
             a[pid] = lista
     return {"g": [g for _, g in golpes], "a": a}
+
+
+def efeito_atributos(m, meta):
+    if m["name"] in EFEITOS_EXTRA:
+        return EFEITOS_EXTRA[m["name"]]
+    mud = [[STATS[x["stat_id"]], x["change"]] for x in (m.get("sc") or []) if x["stat_id"] in STATS]
+    cat, chance = meta.get("move_meta_category_id"), meta.get("stat_chance") or 0
+    if not mud or cat not in (6, 7):
+        return 0
+    return ["a" if cat == 6 else "u", chance or 100, mud]
 
 
 def gravar(nome, obj):

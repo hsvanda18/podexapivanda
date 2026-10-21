@@ -2,7 +2,7 @@
    - páginas, código e dados: mostra logo o que está guardado e atualiza por trás (stale-while-revalidate)
    - imagens (sprites, artes, ícones, cartas): guardadas na primeira vez e servidas do aparelho depois
    Ao publicar código novo, mude VERSAO para os aparelhos trocarem a cache do site. */
-var VERSAO = 'pkdx-2026-10-21d';
+var VERSAO = 'pkdx-2026-10-21e';
 var CACHE_SITE = 'site-' + VERSAO;
 var CACHE_IMG = 'imagens-v1';
 var LIMITE_IMG = 1500;

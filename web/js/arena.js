@@ -6,7 +6,6 @@
   var K = window.PK, raiz = document.getElementById('app-raiz');
   if (!K || !raiz) { return; }
   var D = K.D, P = K.P, LISTA = K.LISTA, esc = K.esc, corTipo = K.corTipo, nomeTipo = K.nomeTipo, icone = K.icone;
-  var NIVEL = 50;
   var rng = Math.random;
   function mulberry32(a) {
     return function () {
@@ -18,15 +17,21 @@
   }
 
   /* ================= REGRAS ================= */
+  /* Equilíbrio (v2): níveis por Pokémon (dados/niveis.js), estágios de atributos, PP, custos dos golpes fortes,
+     Truant/Slow Start, Mega/Gigantamax só com o item e evolução ao derrubar um adversário.
+     Tudo o que sorteia usa rng() sempre pela mesma ordem: a batalha online depende disso. */
   var G = {};
-  D.gp.forEach(function (r) { G[r[0] + '|' + r[1] + '|' + r[2]] = { t: r[0], c: r[1], papel: r[2], nome: r[3], pw: r[4], ac: r[5], pr: r[6] }; });
+  D.gp.forEach(function (r) { G[r[0] + '|' + r[1] + '|' + r[2]] = { t: r[0], c: r[1], papel: r[2], nome: r[3], pw: r[4], ac: r[5], pr: r[6], pp: r[6] > 0 ? 30 : 15 }; });
   function golpe(t, c, papel) { return G[t + '|' + c + '|' + papel] || G[t + '|' + (c === 'F' ? 'E' : 'F') + '|' + papel] || null; }
   /* golpes reais (dados/golpes.js): cada Pokémon só usa golpes que aprende nos jogos */
   var GD = window.GOLPES_DADOS;
   var GR = GD ? GD.g.map(function (r, i) {
-    return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9] };
+    return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9],
+      pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '' };
   }) : [];
-  var VERSAO = D.v + '.' + GR.length;
+  var VERSAO = D.v + '.' + GR.length + '.r2';
+  /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
+  var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
   function aprende(p) {
     if (!GD) { return []; }
@@ -34,10 +39,12 @@
     if (!l) { var base = LISTA.find(function (x) { return x.esp === p.esp && x.padrao; }); l = base && GD.a[base.id]; }
     return (l || []).map(function (i) { return GR[i]; });
   }
-  /* força do golpe nas mãos de p: base da escolha automática e da ordem da lista */
+  function baixaPropria(g) { return g.ef && g.ef[0] === 'u' && g.ef[2].some(function (x) { return x[1] < 0; }); }
+  /* força do golpe nas mãos de p: base da escolha automática e da ordem da lista (já desconta os custos) */
   function forca(p, g) {
     var A = g.c === 'F' ? p.b.atk : p.b.spa, stab = p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
-    return g.pw * acertosMedios(g) * stab * A * (g.ac ? g.ac / 100 : 1) * (g.ca === 2 ? 1.5 : g.ca === 1 ? 1.06 : 1) * (g.dr < 0 ? 0.9 : 1);
+    return g.pw * acertosMedios(g) * stab * A * (g.ac ? g.ac / 100 : 1) * (g.ca === 2 ? 1.5 : g.ca === 1 ? 1.06 : 1) * (g.dr < 0 ? 0.9 : 1) *
+      (baixaPropria(g) ? 0.8 : 1) * (g.esp === 'hp' ? 0.75 : g.esp === 'furia' ? 0.9 : 1) * (g.pp <= 5 ? 0.95 : 1);
   }
   /* escolha automática: o melhor golpe de cada tipo do Pokémon, depois cobertura de outros tipos */
   function golpesAuto(p) {
@@ -62,44 +69,96 @@
     lista.forEach(function (g) { if (g && !vistos[g.nome] && out.length < 4) { vistos[g.nome] = 1; out.push(g); } });
     return out;
   }
-  function statusDe(b) {
-    var f = function (x) { return Math.floor((2 * x + 31) * NIVEL / 100) + 5; };
-    return { hp: Math.floor((2 * b.hp + 31) * NIVEL / 100) + NIVEL + 10, atk: f(b.atk), def: f(b.def), spa: f(b.spa), spd: f(b.spd), spe: f(b.spe) };
+
+  /* ---------- níveis equilibrados (calibrados por simulação; ver calibrar()) ---------- */
+  var NIV = window.NIVEIS || {};
+  function ehFormaEspecial(p) { return !p.padrao && / (Mega|Gigantamax|Primal|Eternamax)/.test(p.nome); }
+  function baseDe(p) { return ehFormaEspecial(p) ? (LISTA.find(function (x) { return x.esp === p.esp && x.padrao; }) || p) : p; }
+  function nivelFormula(p) { return Math.max(40, Math.min(100, Math.round(50 * Math.pow(500 / Math.max(180, p.total), 1.1)))); }
+  function nivelDe(p) { var b = baseDe(p); return NIV[b.id] || nivelFormula(b); }
+  function statusDe(b, nv) {
+    var f = function (x) { return Math.floor((2 * x + 31) * nv / 100) + 5; };
+    return { hp: Math.floor((2 * b.hp + 31) * nv / 100) + nv + 10, atk: f(b.atk), def: f(b.def), spa: f(b.spa), spd: f(b.spd), spe: f(b.spe) };
   }
-  function lutador(id, ids) { var p = P[id], st = statusDe(p.b); return { p: p, st: st, hpMax: st.hp, hp: st.hp, golpes: golpesDe(p, ids) }; }
-  function novoLado(ids, mv) { return { time: ids.map(function (id) { return lutador(id, mv && mv[id]); }), ativo: 0 }; }
+
+  /* ---------- evolução em batalha: ao derrubar um adversário, evolui para o próximo estágio ---------- */
+  var FILHOS = {};
+  D.pk.forEach(function (r) { if (r[14] && r[11] === 1 && P[r[0]]) { (FILHOS[r[14]] || (FILHOS[r[14]] = [])).push(P[r[0]]); } });
+  Object.keys(FILHOS).forEach(function (k) { FILHOS[k].sort(function (a, b) { return a.esp - b.esp; }); });
+  function evolucaoDe(p) { var f = FILHOS[p.esp]; return f && f.length ? f[0] : null; }
+
+  /* ---------- habilidades que travam (por espécie) ---------- */
+  var PREGUICA = { 289: 1 };   // Slaking (Truant): ataca um turno sim, outro não
+  var LENTO = { 486: 1 };      // Regigigas (Slow Start): metade do Ataque e da Velocidade nos 5 primeiros turnos em campo
+
+  /* ---------- lutador ---------- */
+  function zeroEst() { return { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }; }
+  function lutador(id, ids, item) {
+    var p = P[id], nv = nivelDe(p), st = statusDe(p.b, nv), gs = golpesDe(p, ids);
+    return { p: p, nv: nv, st: st, hpMax: st.hp, hp: st.hp, golpes: gs, pp: gs.map(function (g) { return g.pp || 10; }), est: zeroEst(),
+      item: item || null, preso: null, descansa: false, lento: 0 };
+  }
+  function novoLado(ids, mv, itens) { return { time: ids.map(function (id) { return lutador(id, mv && mv[id], itens && itens[id]); }), ativo: 0 }; }
   function ativo(l) { return l.time[l.ativo]; }
   function vivos(l) { return l.time.filter(function (m) { return m.hp > 0; }); }
 
-  /* ---------- Mega Evolução e Gigantamax (uma transformação por time) ---------- */
+  /* ---------- estágios de atributos (-6 a +6) ---------- */
+  var NOME_ATR = { atk: 'Ataque', def: 'Defesa', spa: 'Atq. Esp.', spd: 'Def. Esp.', spe: 'Velocidade' };
+  var CURTO_ATR = { atk: 'ATQ', def: 'DEF', spa: 'A.ESP', spd: 'D.ESP', spe: 'VEL' };
+  function multEst(s) { return s >= 0 ? (2 + s) / 2 : 2 / (2 - s); }
+  function lentoAtivo(m) { return !!LENTO[m.p.esp] && m.lento < 5; }
+  /* crítico ignora as baixas de quem ataca e as subidas de quem defende */
+  function atributo(m, k, crit, atacando) {
+    var s = m.est ? m.est[k] : 0;
+    if (crit && ((atacando && s < 0) || (!atacando && s > 0))) { s = 0; }
+    var v = m.st[k] * multEst(s);
+    if ((k === 'atk' || k === 'spe') && lentoAtivo(m)) { v *= 0.5; }
+    return v;
+  }
+  function velocidade(m) { return atributo(m, 'spe'); }
+  function mudarEst(m, k, d) { var antes = m.est[k]; m.est[k] = Math.max(-6, Math.min(6, antes + d)); return m.est[k] - antes; }
+  /* ao sair de campo, estágios, fúria e contadores voltam ao normal */
+  function sairDeCampo(m) { m.est = zeroEst(); m.preso = null; m.descansa = false; m.lento = 0; }
+
+  /* ---------- Mega Evolução e Gigantamax: só quem leva o item, uma vez por time ---------- */
   function formasDe(p, tipo) {
     var chave = tipo === 'mega' ? ' Mega' : ' Gigantamax';
     return LISTA.filter(function (x) { return x.esp === p.esp && !x.padrao && x.nome.indexOf(chave) > 0; });
   }
+  /* itens possíveis para p: a Mega/Gmax dele ou de uma evolução futura (o item acompanha a evolução) */
+  function itensPossiveis(p) {
+    var out = [], q = p, n = 0;
+    while (q && n++ < 4) {
+      if (out.indexOf('mega') < 0 && formasDe(q, 'mega').length) { out.push('mega'); }
+      if (out.indexOf('gmax') < 0 && formasDe(q, 'gmax').length) { out.push('gmax'); }
+      q = evolucaoDe(q);
+    }
+    return out;
+  }
   function opcoesTransformar(l) {
     var m = ativo(l);
-    if (l.transformou || m.hp <= 0 || m.base) { return []; }
-    return formasDe(m.p, 'mega').map(function (f) { return { tipo: 'mega', p: f }; })
-      .concat(formasDe(m.p, 'gmax').map(function (f) { return { tipo: 'gmax', p: f }; }));
+    if (l.transformou || m.hp <= 0 || m.base || !m.item) { return []; }
+    return formasDe(m.p, m.item).map(function (f) { return { tipo: m.item, p: f }; });
+  }
+  /* Max: poder pela faixa do golpe original (Lutador e Venenoso mais fracos, como nos jogos) */
+  function poderMax(g) {
+    var pw = g.pw * acertosMedios(g), fraco = g.t === 'fighting' || g.t === 'poison';
+    var faixa = pw < 45 ? 0 : pw < 55 ? 1 : pw < 65 ? 2 : pw < 75 ? 3 : pw < 110 ? 4 : pw < 150 ? 5 : 6;
+    return (fraco ? [70, 75, 80, 85, 90, 95, 100] : [90, 100, 110, 120, 130, 140, 150])[faixa];
   }
   function aplicarForma(m, op) {
     var razao = m.hp / m.hpMax;
-    // a Mega mantém os golpes escolhidos; o Gigantamax troca-os pelos golpes Max do mesmo tipo
-    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b); m.hpMax = m.st.hp; m.golpesBase = m.golpes;
+    // a Mega mantém os golpes escolhidos; o Gigantamax troca-os pelos golpes Max (HP ×1,5 durante 3 turnos)
+    m.base = m.p; m.forma = op.tipo; m.p = op.p; m.st = statusDe(op.p.b, m.nv); m.hpMax = m.st.hp; m.golpesBase = m.golpes;
     if (op.tipo === 'gmax') {
-      m.hpMax *= 2; m.gmax = 3;
-      m.golpes = m.golpesBase.map(function (g) { return { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0 }; });
+      m.hpMax = Math.round(m.hpMax * 1.5); m.gmax = 3; m.preso = null;
+      m.golpes = m.golpesBase.map(function (g) { return { t: g.t, c: g.c, nome: 'Max ' + nomeTipo(g.t), pw: poderMax(g), ac: 0, pr: 0, pp: g.pp, max: true }; });
     }
     m.hp = Math.max(1, Math.round(razao * m.hpMax));
   }
-  /* poder dos golpes Max pela faixa do golpe original (como nos jogos, simplificado) */
-  function poderMax(g) {
-    var pw = g.pw * acertosMedios(g);
-    return pw < 45 ? 90 : pw < 55 ? 100 : pw < 65 ? 110 : pw < 75 ? 120 : pw < 110 ? 130 : pw < 150 ? 140 : 150;
-  }
   function desfazerGmax(m) {
     var razao = m.hp / m.hpMax, p = m.base;
-    m.p = p; m.st = statusDe(p.b); m.hpMax = m.st.hp; m.golpes = m.golpesBase || golpesDe(p); m.golpesBase = null; m.gmax = 0; m.base = null; m.forma = null;
+    m.p = p; m.st = statusDe(p.b, m.nv); m.hpMax = m.st.hp; m.golpes = m.golpesBase || golpesDe(p); m.golpesBase = null; m.gmax = 0; m.base = null; m.forma = null;
     m.hp = m.hp <= 0 ? 0 : Math.max(1, Math.round(razao * m.hpMax));
   }
   function rotuloForma(op) {
@@ -107,27 +166,30 @@
     var sufixo = op.p.nome.split(' Mega')[1] || '';
     return '💎 Mega Evoluir' + (sufixo.trim() ? ' ' + sufixo.trim() : '');
   }
+
+  /* ---------- dano ---------- */
   function efTotal(tipo, alvo) { return K.efTotal(tipo, alvo.t); }
-  function danoBase(a, d, g) {
-    var A = g.c === 'F' ? a.st.atk : a.st.spa, Df = g.c === 'F' ? d.st.def : d.st.spd;
-    return Math.floor(Math.floor(Math.floor(2 * NIVEL / 5 + 2) * g.pw * A / Df) / 50) + 2;
+  function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.pw; }
+  function danoBase(a, d, g, crit) {
+    var A = atributo(a, g.c === 'F' ? 'atk' : 'spa', crit, true), Df = atributo(d, g.c === 'F' ? 'def' : 'spd', crit, false);
+    return Math.floor(Math.floor(Math.floor(2 * a.nv / 5 + 2) * poderDe(a, g) * A / Df) / 50) + 2;
   }
   function calcular(a, d, g) {
-    var e = efTotal(g.t, d.p);
+    var e = g.semTipo ? 1 : efTotal(g.t, d.p);
     if (!(g.ac === 0 || rng() * 100 < g.ac)) { return { erro: true, dano: 0, ef: e, crit: false, acertos: 0 }; }
-    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
+    var stab = !g.semTipo && a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1;
     var crit = g.ca === 2 || rng() < (g.ca === 1 ? 1 / 8 : 1 / 24), variacao = 0.85 + rng() * 0.15;
     var acertos = 1;
     if (g.hmax > 1) {
       var r = rng();
       acertos = g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
     }
-    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g) * stab * e * (crit ? 1.5 : 1) * variacao)) * acertos;
+    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao)) * acertos;
     return { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos };
   }
   function esperado(a, d, g) {
-    var stab = a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1, critMedio = g.ca === 2 ? 1.5 : g.ca === 1 ? 1.0625 : 1.02;
-    return danoBase(a, d, g) * stab * efTotal(g.t, d.p) * (g.ac === 0 ? 1 : g.ac / 100) * acertosMedios(g) * critMedio * 0.925;
+    var stab = !g.semTipo && a.p.t.indexOf(g.t) >= 0 ? 1.5 : 1, critMedio = g.ca === 2 ? 1.5 : g.ca === 1 ? 1.0625 : 1.02;
+    return danoBase(a, d, g, false) * stab * (g.semTipo ? 1 : efTotal(g.t, d.p)) * (g.ac === 0 ? 1 : g.ac / 100) * acertosMedios(g) * critMedio * 0.925;
   }
   /* dreno (cura quem atacou) e recuo (fere quem atacou, sem o derrubar) */
   function efeitoDreno(a, g, causado) {
@@ -136,12 +198,72 @@
     if (g.dr > 0) { x = Math.min(x, a.hpMax - a.hp); a.hp += x; return x; }
     x = Math.min(x, a.hp - 1); a.hp -= x; return -x;
   }
-  function melhorEsperado(a, d) { return Math.max.apply(null, a.golpes.map(function (g) { return esperado(a, d, g); })); }
+
+  /* ---------- usar um golpe: regras comuns à batalha e à simulação ---------- */
+  /* decide o golpe que sai mesmo (preguiça, fúria, PP) e gasta o PP */
+  function golpeEfetivo(a, idx) {
+    if (PREGUICA[a.p.esp] && a.descansa) { a.descansa = false; return { descansa: true }; }
+    if (PREGUICA[a.p.esp]) { a.descansa = true; }
+    if (a.preso) { idx = a.preso.idx; }
+    if (!a.pp.some(function (x) { return x > 0; })) { return { g: LUTA, idx: -1 }; }
+    if (!(a.pp[idx] > 0)) { idx = a.pp.findIndex(function (x) { return x > 0; }); }
+    a.pp[idx]--;
+    return { g: a.golpes[idx], idx: idx };
+  }
+  /* depois do golpe: dreno/recuo, Struggle, efeitos nos atributos e fúria; devolve o que aconteceu */
+  function efeitosDepois(a, d, g, r, causado, idx) {
+    var ev = { dreno: 0, est: [] };
+    if (g.luta) {
+      var rec = Math.min(Math.max(1, Math.floor(a.hpMax / 4)), a.hp - 1);
+      if (rec > 0) { a.hp -= rec; ev.dreno = -rec; }
+    } else { ev.dreno = efeitoDreno(a, g, causado); }
+    if (g.ef && !r.erro && r.ef !== 0) {
+      var alvo = g.ef[0] === 'u' ? a : d;
+      if (alvo.hp > 0 && (g.ef[1] >= 100 || rng() * 100 < g.ef[1])) {
+        g.ef[2].forEach(function (x) { ev.est.push({ quem: alvo === a ? 'a' : 'd', k: x[0], d: mudarEst(alvo, x[0], x[1]), pedido: x[1] }); });
+      }
+    }
+    if (g.esp === 'furia') {
+      if (r.erro || r.ef === 0) { a.preso = null; }
+      else if (!a.preso) { a.preso = { idx: idx, resta: rng() < 0.5 ? 1 : 2 }; }
+      else { a.preso.resta--; if (a.preso.resta <= 0) { a.preso = null; ev.cansou = true; } }
+    }
+    return ev;
+  }
+  /* derrubou um adversário: evolui (nível a meio caminho entre o atual e o equilibrado da evolução) */
+  function evoluir(m) {
+    if (m.hp <= 0 || m.base || m.gmax) { return null; }
+    var nova = evolucaoDe(m.p); if (!nova) { return null; }
+    var razao = m.hp / m.hpMax, antes = m.p;
+    m.nv = Math.round((m.nv + nivelDe(nova)) / 2);
+    m.p = nova; m.st = statusDe(nova.b, m.nv); m.hpMax = m.st.hp; m.hp = Math.max(1, Math.round(razao * m.hpMax));
+    return antes;
+  }
+  /* fim do turno: o Início Lento conta os turnos em campo */
+  function fimTurnoLado(l) { var m = ativo(l); if (m.hp > 0 && LENTO[m.p.esp] && m.lento < 5) { m.lento++; } }
+  function prioridade(m, ac) {
+    if (ac.tipo === 'troca') { return 10; }
+    if (!m.pp.some(function (x) { return x > 0; })) { return 0; }
+    var g = m.golpes[m.preso ? m.preso.idx : ac.idx];
+    return g ? g.pr : 0;
+  }
+
+  /* ---------- IA ---------- */
+  function golpesDisponiveis(a) {
+    if (a.preso) { return [a.preso.idx]; }
+    var l = []; a.pp.forEach(function (x, i) { if (x > 0) { l.push(i); } });
+    return l.length ? l : [0];
+  }
+  function melhorEsperado(a, d) {
+    var gs = golpesDisponiveis(a);
+    return Math.max.apply(null, gs.map(function (i) { return a.pp.some(function (x) { return x > 0; }) ? esperado(a, d, a.golpes[i]) : esperado(a, d, LUTA); }));
+  }
   function iaGolpe(a, d) {
-    var rapido = a.st.spe >= d.st.spe, melhor = 0, nota = -1;
-    a.golpes.forEach(function (g, i) {
-      var v = esperado(a, d, g);
+    var rapido = velocidade(a) >= velocidade(d), melhor = golpesDisponiveis(a)[0], nota = -1;
+    golpesDisponiveis(a).forEach(function (i) {
+      var g = a.golpes[i], v = esperado(a, d, g);
       if (g.pr > 0 && !rapido && v >= d.hp) { v += 1000; }
+      if (baixaPropria(g) && v < d.hp) { v *= 0.8; }
       v *= 0.9 + Math.random() * 0.2;
       if (v > nota) { nota = v; melhor = i; }
     });
@@ -158,7 +280,7 @@
   }
   function iaAcao(l, foeLado) {
     var eu = ativo(l), foe = ativo(foeLado);
-    if (vivos(l).length > 1) {
+    if (vivos(l).length > 1 && !eu.preso) {
       var ameaca = melhorEsperado(foe, eu) / eu.hp, forca = melhorEsperado(eu, foe) / foe.hp;
       if (ameaca >= 0.9 && forca < 0.6 && Math.random() < 0.45) {
         var r = iaMelhorReserva(l, foe);
@@ -172,35 +294,41 @@
     if (B.online) {
       // online: exatamente um sorteio por turno; empate de prioridade e velocidade decidido por ele
       var r = rng(), ladoHost = B.host ? 'j' : 'o';
-      var chaveOn = function (x) { return x.a.tipo === 'troca' ? [10, 0] : [ativo(B[x.lado]).golpes[x.a.idx].pr, ativo(B[x.lado]).st.spe]; };
+      var chaveOn = function (x) { var m = ativo(B[x.lado]); return [prioridade(m, x.a), velocidade(m)]; };
       return acoes.sort(function (x, y) {
         var a = chaveOn(x), b = chaveOn(y);
         return b[0] - a[0] || b[1] - a[1] || ((x.lado === ladoHost) === (r < 0.5) ? -1 : 1);
       });
     }
-    function chave(x) {
-      if (x.a.tipo === 'troca') { return [10, 0]; }
-      var m = ativo(B[x.lado]);
-      return [m.golpes[x.a.idx].pr, m.st.spe + Math.random() * 0.1];
-    }
+    function chave(x) { var m = ativo(B[x.lado]); return [prioridade(m, x.a), velocidade(m) + Math.random() * 0.1]; }
     acoes.sort(function (x, y) { var a = chave(x), b = chave(y); return b[0] - a[0] || b[1] - a[1]; });
     return acoes;
   }
-  function simular(idsJ, idsO) {
-    var B = { j: novoLado(idsJ, S.mv.j), o: novoLado(idsO, S.mv.o) }, turnos = 0;
+
+  /* ---------- simulação rápida (previsão, Simular ×1000 e calibração dos níveis) ---------- */
+  function simular(idsJ, idsO, mvJ, mvO) {
+    var B = { j: novoLado(idsJ, mvJ || S.mv.j), o: novoLado(idsO, mvO || S.mv.o) }, turnos = 0;
     while (vivos(B.j).length && vivos(B.o).length && turnos < 300) {
       turnos++;
       var acoes = ordem(B, iaAcao(B.j, B.o), iaAcao(B.o, B.j));
       for (var k = 0; k < acoes.length; k++) {
         var lado = acoes[k].lado, foe = lado === 'j' ? 'o' : 'j', ac = acoes[k].a;
-        if (ac.tipo === 'troca') { B[lado].ativo = ac.idx; continue; }
+        if (ac.tipo === 'troca') { sairDeCampo(ativo(B[lado])); B[lado].ativo = ac.idx; continue; }
         var a = ativo(B[lado]), d = ativo(B[foe]);
         if (a.hp <= 0) { continue; }
-        var gs = a.golpes[ac.idx], antes = d.hp;
-        d.hp = Math.max(0, d.hp - calcular(a, d, gs).dano);
-        efeitoDreno(a, gs, antes - d.hp);
-        if (d.hp <= 0) { var r = iaMelhorReserva(B[foe], ativo(B[lado])); if (r >= 0) { B[foe].ativo = r; } break; }
+        var uso = golpeEfetivo(a, ac.idx);
+        if (uso.descansa) { continue; }
+        var r = calcular(a, d, uso.g), antes = d.hp;
+        d.hp = Math.max(0, d.hp - r.dano);
+        efeitosDepois(a, d, uso.g, r, antes - d.hp, uso.idx);
+        if (d.hp <= 0) {
+          evoluir(a);
+          var rs = iaMelhorReserva(B[foe], a);
+          if (rs >= 0) { sairDeCampo(d); B[foe].ativo = rs; }
+          break;
+        }
       }
+      fimTurnoLado(B.j); fimTurnoLado(B.o);
     }
     return { venc: vivos(B.j).length ? 'j' : 'o', turnos: turnos };
   }
@@ -213,11 +341,13 @@
   /* ================= ESTADO ================= */
   /* fotografia da batalha local (só entre turnos): Pokémon por id, com HP, forma e golpes */
   function fotoLutador(m) {
-    return { pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null };
+    return { pid: m.p.id, bid: m.base ? m.base.id : null, forma: m.forma || null, hp: m.hp, hpMax: m.hpMax, gmax: m.gmax || 0, golpes: m.golpes, golpesBase: m.golpesBase || null,
+      nv: m.nv, pp: m.pp, est: m.est, item: m.item, preso: m.preso, descansa: m.descansa, lento: m.lento };
   }
   function lutadorDaFoto(f) {
-    var p = P[f.pid]; if (!p) { return null; }
-    return { p: p, st: statusDe(p.b), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax };
+    var p = P[f.pid]; if (!p || !f.nv || !f.pp) { return null; }
+    return { p: p, nv: f.nv, st: statusDe(p.b, f.nv), hp: f.hp, hpMax: f.hpMax, golpes: f.golpes, golpesBase: f.golpesBase, base: f.bid ? P[f.bid] : null, forma: f.forma, gmax: f.gmax,
+      pp: f.pp, est: f.est || zeroEst(), item: f.item || null, preso: f.preso || null, descansa: !!f.descansa, lento: f.lento || 0 };
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
@@ -251,6 +381,7 @@
     S.on = { pronto: false, opPronto: false, opQtd: 0, opTime: [], codigo: '', aviso: '', host: false, p: novaPartida() };
   }
   if (!S.mv) { S.mv = { j: {}, o: {} }; }
+  if (!S.itens) { S.itens = { j: {}, o: {} }; }
   var NET = window.PKOnline;
   function emOnline() { return !!(S.B && S.B.online); }
   function $(id) { return document.getElementById(id); }
@@ -265,9 +396,38 @@
     var p = P[id];
     return `<div class='sl sl-cheio' style='--c:${corTipo(p.t[0])}'>
       <div class='sl-arte'>${K.img([K.URL.arte(id), K.URL.home(id)])}</div>
-      <div class='sl-info'><b title='${esc(p.nome)}'>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Total base ${p.total}</span></div>
-        <div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>✎ Golpes</em>${S.mv[l][id] ? '' : '<small>auto</small>'}</div>
+      <div class='sl-info'><b title='${esc(p.nome)}'>${esc(p.nome)}</b><div class='sl-tipos'>${p.t.map(K.chip).join('')}</div><span>Nv. ${nivelDe(p)} · base ${p.total}</span></div>
+        ${itemHtml(l, p)}<div class='sl-gps' data-acao='editarGolpes' data-lado='${l}' data-id='${id}' title='Escolher golpes'>${golpesDe(p, S.mv[l][id]).map(function (g) { return icone(g.t, 14); }).join('')}<em>✎ Golpes</em>${S.mv[l][id] ? '' : '<small>auto</small>'}</div>
       <i data-acao='tirar' data-lado='${l}' data-i='${i}'>×</i></div>`;
+  }
+  /* botão do item: só para quem tem (ou terá ao evoluir) Mega ou Gigantamax; um item por time */
+  function itemHtml(l, p) {
+    var pos = itensPossiveis(p); if (!pos.length) { return ''; }
+    var meu = S.itens[l][p.id];
+    var txt = meu === 'mega' ? '💎' : meu === 'gmax' ? '🔴' : '＋';
+    var dica = meu ? (meu === 'mega' ? 'Leva a Pedra Mega' : 'Leva o Fator Gigantamax') + ' · toca para mudar' : 'Dar Pedra Mega / Fator Gigantamax (um por time)';
+    return `<b class='sl-item${meu ? ' on ' + meu : ''}' data-acao='item' data-lado='${l}' data-id='${p.id}' title='${dica}'>${txt}</b>`;
+  }
+  function trocarItem(l, id) {
+    var pos = itensPossiveis(P[id]), atual = S.itens[l][id], ciclo = [null].concat(pos);
+    var prox = ciclo[(ciclo.indexOf(atual || null) + 1) % ciclo.length];
+    S.itens[l] = {};
+    if (prox) { S.itens[l][id] = prox; }
+  }
+  /* sem item escolhido, o primeiro do time que puder leva-o (Mega primeiro) */
+  function itensAuto(ids) {
+    var out = {};
+    ['mega', 'gmax'].some(function (tipo) {
+      var id = ids.find(function (i) { return itensPossiveis(P[i]).indexOf(tipo) >= 0; });
+      if (id) { out[id] = tipo; return true; }
+      return false;
+    });
+    return out;
+  }
+  function itensDoTime(l) {
+    var out = {};
+    Object.keys(S.itens[l] || {}).forEach(function (id) { if (S.time[l].indexOf(+id) >= 0) { out[id] = S.itens[l][id]; } });
+    return out;
   }
   function colunaHtml(l, titulo) {
     var slots = '';
@@ -280,7 +440,7 @@
   function filtrados() {
     var b = K.normalizar(S.busca);
     return LISTA.filter(function (p) {
-      return (!b || K.normalizar(p.nome).indexOf(b) >= 0 || String(p.esp) === b) && (!S.tipo || p.t.indexOf(S.tipo) >= 0) && (!S.gen || p.gen === S.gen);
+      return !ehFormaEspecial(p) && (!b || K.normalizar(p.nome).indexOf(b) >= 0 || String(p.esp) === b) && (!S.tipo || p.t.indexOf(S.tipo) >= 0) && (!S.gen || p.gen === S.gen);
     });
   }
   function gradeHtml() {
@@ -296,7 +456,7 @@
   function previaHtml() {
     var cheio = S.time.j.length === tamanhoTime() && S.time.o.length === tamanhoTime();
     if (!cheio) { return `<span class='pv-dica'>Clique num lado e escolha os Pokémon na grade · nível 50 · golpes definidos pelos tipos</span>`; }
-    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',') + ':' + JSON.stringify(S.mv);
+    var chave = S.modo + ':' + S.time.j.join(',') + 'x' + S.time.o.join(',') + ':' + JSON.stringify(S.mv) + JSON.stringify(S.itens);
     if (!S.previa || S.previa.chave !== chave) { S.previa = rodarSimulacoes(300); S.previa.chave = chave; }
     var pj = S.previa.j;
     return `<div class='pv'><span class='pv-tit'>PREVISÃO</span>
@@ -453,10 +613,21 @@
     return `<div class='hud hud-${lado}'>
       <div class='hud-foto' style='--c:${corTipo(m.p.t[0])}'>${K.img([K.URL.home(m.p.id), K.URL.sprite(m.p.id)])}</div>
       <div class='hud-corpo'>
-        <div class='hud-nome'><b>${esc(m.p.nome)}</b>${m.p.t.map(function (t) { return icone(t, 16); }).join('')}<span>Nv. ${NIVEL}</span>${m.gmax > 0 ? `<em class='gmax-t'>G-MAX ${m.gmax}</em>` : ''}${bolas}</div>
+        <div class='hud-nome'><b>${esc(m.p.nome)}</b>${m.p.t.map(function (t) { return icone(t, 16); }).join('')}<span>Nv. ${m.nv}</span>${m.gmax > 0 ? `<em class='gmax-t'>G-MAX ${m.gmax}</em>` : ''}${bolas}</div>
+        <div class='hud-est'>${estHtml(m)}</div>
         <div class='hp'><div class='hp-fant' id='hpg-${lado}' style='width:${pct}%'></div><div class='hp-f ${hpClasse(m)}' id='hpf-${lado}' style='width:${pct}%'></div></div>
         <div class='hp-tx' id='hpt-${lado}'>${m.hp} / ${m.hpMax} HP</div>
       </div></div>`;
+  }
+  function estHtml(m) {
+    var out = Object.keys(m.est || {}).filter(function (k) { return m.est[k]; }).map(function (k) {
+      var v = m.est[k]; return `<i class='${v > 0 ? 'sobe' : 'desce'}'>${CURTO_ATR[k]} ${v > 0 ? '+' : ''}${v}</i>`;
+    });
+    if (PREGUICA[m.p.esp]) { out.push(`<i class='hab'>${m.descansa ? '😴 vai preguiçar' : '😴 Truant'}</i>`); }
+    if (LENTO[m.p.esp]) { out.push(`<i class='hab'>${lentoAtivo(m) ? '🐢 Início lento ' + m.lento + '/5' : '🐢 em força'}</i>`); }
+    if (m.preso) { out.push(`<i class='hab'>🔒 ${esc(m.golpes[m.preso.idx].nome)}</i>`); }
+    if (m.item && !m.base) { out.push(`<i class='hab'>${m.item === 'mega' ? '💎 Pedra Mega' : '🔴 Fator Gmax'}</i>`); }
+    return out.join('');
   }
   function cartaLado(lado) {
     var l = S.B[lado], m = ativo(l), p = m.p, max = 160;
@@ -485,15 +656,25 @@
     var copia = Object.assign({}, eu); aplicarForma(copia, op); return copia.golpes;
   }
   function golpesHtml() {
-    var foe = ativo(S.B.o), trava = S.ocupado || S.auto || !!S.fim || !!S.escolha || jaEscolhi();
+    var foe = ativo(S.B.o), eu = ativo(S.B.j), trava = S.ocupado || S.auto || !!S.fim || !!S.escolha || jaEscolhi();
+    if (!eu.pp.some(function (x) { return x > 0; })) {
+      return `<div class='gp${trava ? ' off' : ''}' data-acao='golpe' data-i='0' style='--c:#A8A878'><div class='gp-ico'>${icone('normal', 30)}</div>
+        <div class='gp-tx'><b>Struggle</b><span>Sem PP em nenhum golpe · Poder 50 · recuo de ¼ do HP</span></div><em class='ef ef-nor'>último recurso</em></div>`;
+    }
     return golpesVisiveis().map(function (g, i) {
+      var semPP = !(eu.pp[i] > 0), bloqueado = eu.preso && eu.preso.idx !== i;
       var e = efTotal(g.t, foe.p);
       var tag = e === 0 ? ['nul', 'sem efeito'] : e >= 2 ? ['sup', 'super efetivo ×' + e] : e < 1 ? ['pou', 'pouco efetivo ×' + K.fmtEf(e)] : ['nor', 'normal'];
-      return `<div class='gp${trava ? ' off' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
-        <div class='gp-ico'>${icone(g.t, 30)}</div>
-        <div class='gp-tx'><b>${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.pw}${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}</span></div>
+      return `<div class='gp${trava || semPP || bloqueado ? ' off' : ''}${eu.preso && !bloqueado ? ' preso' : ''}' data-acao='golpe' data-i='${i}' style='--c:${corTipo(g.t)}'>
+        <div class='gp-ico'>${icone(g.t, 30)}</div><small class='gp-pp${eu.pp[i] <= 2 ? ' pouco' : ''}'>PP ${eu.pp[i]}/${g.pp || 10}</small>
+        <div class='gp-tx'><b>${eu.preso && !bloqueado ? '🔒 ' : ''}${esc(g.nome)}</b><span>${g.c === 'F' ? 'Físico' : 'Especial'} · Poder ${g.esp === 'hp' ? poderDe(eu, g) + ' (cai com o HP)' : g.pw}${g.hmax > 1 ? ' ×' + (g.hmin === g.hmax ? g.hmin : g.hmin + '–' + g.hmax) : ''} · ${g.ac ? g.ac + '%' : 'nunca erra'}${g.pr > 0 ? ' · ⚡ prioridade' : ''}${g.dr > 0 ? ' · drena' : g.dr < 0 ? ' · recuo' : ''}${efeitoTexto(g)}${g.esp === 'furia' ? ' · prende 2-3 turnos' : ''}</span></div>
         <em class='ef ef-${tag[0]}'>${tag[1]}</em></div>`;
     }).join('');
+  }
+  function efeitoTexto(g) {
+    if (!g.ef) { return ''; }
+    var partes = g.ef[2].map(function (x) { return CURTO_ATR[x[0]] + ' ' + (x[1] > 0 ? '+' : '') + x[1]; }).join(' ');
+    return ' · ' + (g.ef[0] === 'u' ? 'em si: ' : 'no alvo: ') + partes + (g.ef[1] < 100 ? ' (' + g.ef[1] + '%)' : '');
   }
   function logHtml() { return S.log.slice(-60).map(function (x) { return `<div>${x}</div>`; }).join(''); }
   function simHtml() {
@@ -683,15 +864,26 @@
 
   /* ================= TURNO ================= */
   async function usarGolpe(lado, idx) {
-    var B = S.B, foe = lado === 'j' ? 'o' : 'j', a = ativo(B[lado]), d = ativo(B[foe]), g = a.golpes[idx];
+    var B = S.B, foe = lado === 'j' ? 'o' : 'j', a = ativo(B[lado]), d = ativo(B[foe]);
     var quem = lado === 'j' ? esc(a.p.nome) : esc(a.p.nome) + ' inimigo';
+    var uso = golpeEfetivo(a, idx);
+    if (uso.descansa) {
+      mensagem(`<b>${quem}</b> está a preguiçar...`); registrar(`<b>${esc(a.p.nome)}</b> está a preguiçar (Truant).`);
+      await esperar(900); return false;
+    }
+    var g = uso.g;
+    if (g.luta) { registrar(`<b>${esc(a.p.nome)}</b> já não tem PP!`); }
     mensagem(`<b>${quem}</b> usou <span style='color:${corTipo(g.t)}'>${esc(g.nome)}</span>!`);
     registrar(`<b>${esc(a.p.nome)}</b> usou <span style='color:${corTipo(g.t)}'>${esc(g.nome)}</span>`);
     await esperar(350);
     await animarAtaque(lado, foe, g);
     var r = calcular(a, d, g);
-    if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); return false; }
-    if (r.ef === 0) { bannerFx('NÃO AFETA', 'nul'); mensagem(`Não afeta ${esc(d.p.nome)}...`); registrar('Não afetou.'); await esperar(800); return false; }
+    if (r.erro || r.ef === 0) {
+      efeitosDepois(a, d, g, r, 0, uso.idx);
+      if (r.erro) { textoFx('ERROU!', 'erro', foe); mensagem('Mas errou!'); registrar('Errou!'); await esperar(650); }
+      else { bannerFx('NÃO AFETA', 'nul'); mensagem(`Não afeta ${esc(d.p.nome)}...`); registrar('Não afetou.'); await esperar(800); }
+      return false;
+    }
     impacto(foe, g.t, r.ef >= 2 || r.crit);
     var hpAntes = d.hp;
     d.hp = Math.max(0, d.hp - r.dano);
@@ -702,16 +894,47 @@
     else if (r.ef < 1) { bannerFx('pouco efetivo...', 'pou'); registrar(`<i class='pou'>Não foi muito efetivo...</i>`); }
     await animarHp(foe, d);
     if (r.acertos > 1) { registrar(`Acertou ${r.acertos} vezes!`); }
-    var dreno = efeitoDreno(a, g, hpAntes - d.hp);
-    if (dreno > 0) { textoFx('+' + dreno, 'num cura', lado); registrar(`<b>${esc(a.p.nome)}</b> recuperou ${dreno} HP.`); await animarHp(lado, a); }
-    else if (dreno < 0) { textoFx(String(dreno), 'num', lado); registrar(`<b>${esc(a.p.nome)}</b> sofreu ${-dreno} de recuo.`); await animarHp(lado, a); }
+    var ev = efeitosDepois(a, d, g, r, hpAntes - d.hp, uso.idx);
+    if (ev.dreno > 0) { textoFx('+' + ev.dreno, 'num cura', lado); registrar(`<b>${esc(a.p.nome)}</b> recuperou ${ev.dreno} HP.`); await animarHp(lado, a); }
+    else if (ev.dreno < 0) { textoFx(String(ev.dreno), 'num', lado); registrar(`<b>${esc(a.p.nome)}</b> sofreu ${-ev.dreno} de recuo.`); await animarHp(lado, a); }
+    if (ev.est.length) { await mostrarEstagios(ev.est, lado, foe, a, d); }
+    if (ev.cansou) { registrar(`<b>${esc(a.p.nome)}</b> acalmou-se.`); }
     if (d.hp <= 0) {
       if (mon) { mon.classList.add('desmaio'); }
       mensagem(`<b>${esc(d.p.nome)}</b> desmaiou!`); registrar(`<b>${esc(d.p.nome)}</b> desmaiou!`);
       await esperar(1000);
+      var antes = evoluir(a);
+      if (antes) { await animarEvolucao(lado, antes, a); }
       return true;
     }
     return false;
+  }
+  async function mostrarEstagios(lista, lado, foe, a, d) {
+    var txt = lista.map(function (x) {
+      var nome = esc((x.quem === 'a' ? a : d).p.nome), atr = NOME_ATR[x.k];
+      if (!x.d) { return `${atr} de <b>${nome}</b> não pode ${x.pedido > 0 ? 'subir' : 'baixar'} mais.`; }
+      var grau = Math.abs(x.d) >= 2 ? ' muito' : '';
+      return `${atr} de <b>${nome}</b>${x.d > 0 ? ' subiu' : ' baixou'}${grau}!`;
+    });
+    txt.forEach(function (t) { registrar(t); });
+    lista.forEach(function (x) { if (x.d) { textoFx(CURTO_ATR[x.k] + (x.d > 0 ? ' ↑' : ' ↓'), x.d > 0 ? 'num cura' : 'num', x.quem === 'a' ? lado : foe); } });
+    mensagem(txt[0]);
+    var h = $('ar-palco'); if (h) { var est = h.querySelectorAll('.hud-est'); if (est.length) { est[0].innerHTML = estHtml(ativo(S.B.j)); if (est[1]) { est[1].innerHTML = estHtml(ativo(S.B.o)); } } }
+    await esperar(700);
+  }
+  async function animarEvolucao(lado, antes, m) {
+    var c = centro(lado), nome = esc(antes.nome), depois = esc(m.p.nome);
+    mensagem(`O quê? <b>${nome}</b> está a evoluir!`);
+    var mon = $('mon-' + lado); if (mon) { mon.classList.add('mega-anim'); }
+    particula('arco', c.x, c.y, '#fff', 0, 0, 1300);
+    await esperar(1300);
+    particula('flash', 640, 360, '#FFFFFF', 0, 0, 420);
+    registrar(`<i class='crit'>${nome} evoluiu para ${depois}! (Nv. ${m.nv})</i>`);
+    S.msg = `<b>${nome}</b> evoluiu para <b>${depois}</b>!`;
+    render();
+    bannerFx('EVOLUÇÃO!', 'mega');
+    var mon2 = $('mon-' + lado); if (mon2) { mon2.classList.add('entra'); }
+    await esperar(1100);
   }
   async function transformar(lado, op) {
     var l = S.B[lado], m = ativo(l), antes = esc(m.p.nome), c = centro(lado);
@@ -742,6 +965,7 @@
   async function entrar(lado, idx) {
     var B = S.B, velho = ativo(B[lado]);
     if (velho.gmax > 0) { desfazerGmax(velho); }
+    sairDeCampo(velho);
     B[lado].ativo = idx;
     var nome = esc(ativo(B[lado]).p.nome);
     S.msg = lado === 'j' ? `Vai, <b>${nome}</b>!` : `O oponente enviou <b>${nome}</b>!`;
@@ -785,6 +1009,7 @@
     for (var lg of ['j', 'o']) {
       var mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
+      fimTurnoLado(B[lg]);
     }
     S.ocupado = false; S.msg = 'O que <b>' + esc(ativo(B.j).p.nome) + '</b> vai fazer?'; render();
     if (S.auto) { proximoAuto(); }
@@ -796,7 +1021,8 @@
     }, 700);
   }
   async function iniciarBatalha(online) {
-    S.B = { j: novoLado(S.time.j, S.mv.j), o: novoLado(S.time.o, S.mv.o) };
+    if (!online && !Object.keys(itensDoTime('o')).length) { S.itens.o = itensAuto(S.time.o); }
+    S.B = { j: novoLado(S.time.j, S.mv.j, itensDoTime('j')), o: novoLado(S.time.o, S.mv.o, itensDoTime('o')) };
     if (online) { S.B.online = true; S.B.host = online.host; }
     S.log = ['A batalha começou!']; S.fim = null; S.escolha = null; S.sim = null; S.ocupado = true;
     S.msg = 'A batalha vai começar!'; S.tela = 'batalha'; render();
@@ -855,6 +1081,7 @@
     for (var g = 0; g < 2; g++) {
       var lg = lados[g], mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
+      fimTurnoLado(B[lg]);
     }
     fecharTurno(n);
     S.ocupado = false; S.msg = p.deles[p.turno] ? msgVez() + ' <i>(o adversário já escolheu)</i>' : msgVez(); render();
@@ -863,7 +1090,7 @@
   /* fim do turno: avança o contador e compara o estado com o do outro lado */
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
-      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp; }).join(',');
+      return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id; }).join(',') + ':' + JSON.stringify(ativo(B[l]).est);
     }).join('|');
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
@@ -902,7 +1129,7 @@
   function comecarOnline() {
     // só o anfitrião: sorteia a semente e manda os dois times
     var cfg = { t: 'inicio', semente: Math.floor(Math.random() * 4294967296), modo: S.modo, times: { host: S.time.j.slice(), conv: S.on.opTime.slice() },
-      mv: { host: golpesDoTime(S.time.j, S.mv.j), conv: S.on.opMv || {} } };
+      mv: { host: golpesDoTime(S.time.j, S.mv.j), conv: S.on.opMv || {} }, itens: { host: itensDoTime('j'), conv: S.on.opItens || {} } };
     NET.enviar(cfg);
     iniciarOnline(cfg);
   }
@@ -931,6 +1158,8 @@
     S.time.o = (host ? cfg.times.conv : cfg.times.host).slice();
     var mv = cfg.mv || {};
     S.mv.j = limparGolpes(host ? mv.host : mv.conv); S.mv.o = limparGolpes(host ? mv.conv : mv.host);
+    var it = cfg.itens || {};
+    S.itens.j = limparItens(host ? it.host : it.conv); S.itens.o = limparItens(host ? it.conv : it.host);
     S.ge = null;
     S.on.host = host; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     rng = mulberry32(cfg.semente);
@@ -940,7 +1169,7 @@
     if (avisarOutro && emOnline()) { NET.enviar({ t: 'sala' }); }
     rng = Math.random;
     S.tela = 'selecao'; S.B = null; S.fim = null; S.escolha = null; S.ocupado = false; S.auto = false;
-    S.time.o = []; S.mv.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
+    S.time.o = []; S.mv.o = {}; S.itens.o = {}; S.on.pronto = S.on.opPronto = false; S.on.p = novaPartida();
     enviarTime(); render();
   }
   function ausenteHtml() { return NET && NET.estado === 'ausente' ? "<div class='on-aus'>⏸ O adversário saiu da app. A batalha continua quando ele voltar.</div>" : ''; }
@@ -954,7 +1183,7 @@
   function revancheOnline() {
     var p = S.on.p;
     if (p.revEu && p.revEle && NET.papel === 'host') {
-      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice(); S.on.opMv = golpesDoTime(S.time.o, S.mv.o);
+      S.time.j = S.time.j.slice(); S.on.opTime = S.time.o.slice(); S.on.opMv = golpesDoTime(S.time.o, S.mv.o); S.on.opItens = itensDoTime('o');
       comecarOnline();
     }
   }
@@ -976,9 +1205,14 @@
   }
   function ligadoOuAusente() { return NET && (NET.estado === 'ligado' || NET.estado === 'ausente'); }
   function caiu() { return NET && (NET.estado === 'caiu' || NET.estado === 'erro' || NET.estado === 'off'); }
+  function limparItens(it) {
+    var out = {}, n = 0;
+    Object.keys(it || {}).forEach(function (id) { if (n < 1 && P[id] && (it[id] === 'mega' || it[id] === 'gmax') && itensPossiveis(P[id]).indexOf(it[id]) >= 0) { out[id] = it[id]; n++; } });
+    return out;
+  }
   function enviarTime() {
     if (!S.online || !ligadoOuAusente()) { return; }
-    NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), pronto: S.on.pronto });
+    NET.enviar({ t: 'time', ids: S.time.j.slice(), mv: golpesDoTime(S.time.j, S.mv.j), itens: itensDoTime('j'), pronto: S.on.pronto });
   }
   function talvezComecar() {
     if (NET.papel === 'host' && S.on.pronto && S.on.opPronto && S.time.j.length === tamanhoTime() && S.on.opTime.length === tamanhoTime()) { comecarOnline(); }
@@ -994,7 +1228,7 @@
         S.modo = m.m; S.time.j = S.time.j.slice(0, tamanhoTime()); S.on.pronto = false; enviarTime();
         if (S.tela !== 'batalha') { render(); } break;
       case 'time':
-        S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
+        S.on.opTime = m.ids || []; S.on.opMv = limparGolpes(m.mv); S.on.opItens = limparItens(m.itens); S.on.opQtd = S.on.opTime.length; S.on.opPronto = !!m.pronto;
         if (S.tela !== 'batalha') { render(); talvezComecar(); } break;
       case 'inicio': iniciarOnline(m); break;
       case 'retomar': retomarOnline(m); break;
@@ -1022,6 +1256,35 @@
     });
   }
   function codigoDoLink() { var m = /^#sala-([A-Za-z0-9]{6})$/.exec(location.hash || ''); return m ? m[1].toUpperCase() : ''; }
+
+  /* ================= CALIBRAÇÃO DOS NÍVEIS ================= */
+  /* corre na consola (__arenaApi.calibrar()): ajusta o nível de cada Pokémon até ganhar perto de 50%
+     contra adversários ao acaso, em 1x1 com golpes automáticos. O resultado vai para web/dados/niveis.js. */
+  function calibrar(opts) {
+    opts = opts || {};
+    var cand = LISTA.filter(function (p) { return !ehFormaEspecial(p); }), rodadas = opts.rodadas || [[12, 40], [6, 60], [3, 80], [2, 120]];
+    cand.forEach(function (p) { if (!NIV[p.id]) { NIV[p.id] = nivelFormula(p); } });
+    var estado = { feito: 0, total: cand.length * rodadas.length, rodada: 0 };
+    window.__calibracao = estado;
+    function pool(n) { var o = []; for (var i = 0; i < n; i++) { o.push(cand[Math.floor(Math.random() * cand.length)].id); } return o; }
+    return new Promise(function (ok) {
+      var r = 0, i = 0;
+      function passo() {
+        var t0 = Date.now();
+        while (Date.now() - t0 < 40) {
+          if (r >= rodadas.length) { estado.fim = true; ok(NIV); return; }
+          var p = cand[i], passoN = rodadas[r][0], n = rodadas[r][1], vit = 0, ops = pool(n);
+          ops.forEach(function (o) { if (simular([p.id], [o], {}, {}).venc === 'j') { vit++; } });
+          var wr = vit / n, ajuste = Math.round((0.5 - wr) * 2 * passoN);
+          NIV[p.id] = Math.max(1, Math.min(100, NIV[p.id] + ajuste));
+          estado.feito++; i++;
+          if (i >= cand.length) { i = 0; r++; estado.rodada = r; }
+        }
+        setTimeout(passo, 0);
+      }
+      passo();
+    });
+  }
 
   /* ================= CLIQUES ================= */
   function sortear(l) {
@@ -1051,6 +1314,11 @@
         try { navigator.clipboard.writeText(NET.link()).then(ok, function () { campo.select(); }); } catch (e) { campo.select(); }
         break;
       case 'pronto': S.on.pronto = !S.on.pronto; enviarTime(); render(); talvezComecar(); break;
+      case 'item':
+        ev.stopPropagation();
+        trocarItem(l, +el.getAttribute('data-id'));
+        if (S.online) { S.on.pronto = false; enviarTime(); }
+        S.previa = null; render(); break;
       case 'editarGolpes':
         ev.stopPropagation();
         var eid = +el.getAttribute('data-id');
@@ -1076,6 +1344,7 @@
         if (S.time[lado].length >= tamanhoTime()) { if (S.online) { break; } lado = lado === 'j' ? 'o' : 'j'; }
         if (S.time[lado].length < tamanhoTime() && S.time[lado].indexOf(id) < 0) {
           S.time[lado].push(id);
+          if (!Object.keys(itensDoTime(lado)).length) { var itAuto = itensAuto([id]); if (Object.keys(itAuto).length) { S.itens[lado] = itAuto; } }
           if (S.time[lado].length >= tamanhoTime() && lado === 'j') { S.lado = 'o'; } else { S.lado = lado; }
         }
         render(); break;
@@ -1118,7 +1387,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { simular: simular, golpesDe: golpesDe, statusDe: statusDe, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
@@ -1129,7 +1398,7 @@
       var s = window.__arena; if (!s) { return; }
       var local = s.tela === 'batalha' && s.B && !s.B.online && fotoEstavel;
       K.guardar('arena', { versao: s.versao, tela: local ? 'batalha' : 'selecao', modo: s.modo, lado: s.lado, time: s.online ? { j: s.time.j, o: [] } : s.time,
-        mv: s.online ? { j: s.mv.j, o: {} } : s.mv, busca: s.busca, tipo: s.tipo, gen: s.gen, log: local ? fotoEstavel.log : [],
+        mv: s.online ? { j: s.mv.j, o: {} } : s.mv, itens: s.online ? { j: s.itens.j, o: {} } : s.itens, busca: s.busca, tipo: s.tipo, gen: s.gen, log: local ? fotoEstavel.log : [],
         msg: local ? fotoEstavel.msg : '', escolha: local ? fotoEstavel.escolha : null, fim: local ? fotoEstavel.fim : null, foto: local ? fotoEstavel.B : null });
     });
   }

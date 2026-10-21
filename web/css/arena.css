@@ -349,3 +349,19 @@
 /* ---------- online: adversário fora da app ---------- */
 .sala-aus { font-size: 13px; font-weight: 800; color: #FFCB05; }
 .on-aus { margin-top: 4px; font-size: 10.5px; font-weight: 700; line-height: 1.35; color: #FFE9A8; background: rgba(255,203,5,.10); border: 1px solid rgba(255,203,5,.35); border-radius: 10px; padding: 6px 8px; text-align: center; }
+
+/* ---------- equilíbrio: item, nível, PP e estágios ---------- */
+.sl-item { position: absolute; top: 6px; right: 36px; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-style: normal; color: #C9CFDA; background: rgba(0,0,0,.35); border: 1px dashed rgba(255,255,255,.3); cursor: pointer; }
+.sl-item.on { border-style: solid; }
+.sl-item.mega { border-color: #EC4899; box-shadow: 0 0 10px rgba(236,72,153,.5); }
+.sl-item.gmax { border-color: #E11D48; box-shadow: 0 0 10px rgba(225,29,72,.5); }
+.sl-item:hover { border-color: #FFCB05; }
+.hud-est { display: flex; flex-wrap: wrap; gap: 3px; min-height: 0; margin-top: 2px; }
+.hud-est i { font-style: normal; font-size: 9px; font-weight: 800; padding: 1px 6px; border-radius: 999px; background: rgba(255,255,255,.1); color: #E9ECF2; }
+.hud-est i.sobe { background: rgba(61,220,151,.22); color: #9BF0C8; }
+.hud-est i.desce { background: rgba(255,90,54,.22); color: #FFB4A0; }
+.hud-est i.hab { background: rgba(255,203,5,.16); color: #FFE27A; }
+.gp { position: relative; }
+.gp-pp { position: absolute; top: 4px; right: 8px; font-size: 9px; font-weight: 800; color: rgba(255,255,255,.7); }
+.gp-pp.pouco { color: #FF8A70; }
+.gp.preso { box-shadow: 0 0 0 2px #FFCB05; }
