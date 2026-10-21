@@ -29,7 +29,7 @@
     return { id: i, nome: r[0], t: r[1], c: r[2], pw: r[3], ac: r[4], pr: r[5], hmin: r[6], hmax: r[7], dr: r[8], ca: r[9],
       pp: r[10] || 10, ef: r[11] || null, esp: r[12] || '' };
   }) : [];
-  var VERSAO = D.v + '.' + GR.length + '.r3';
+  var VERSAO = D.v + '.' + GR.length + '.r4';
   /* sem PP em nenhum golpe: Struggle (sem tipo, recuo de ¼ do HP) */
   var LUTA = { nome: 'Struggle', t: 'normal', c: 'F', pw: 50, ac: 0, pr: 0, pp: 0, semTipo: true, luta: true };
   function acertosMedios(g) { return !g.hmax || g.hmax <= 1 ? 1 : g.hmin === 2 && g.hmax === 5 ? 3.1 : (g.hmin + g.hmax) / 2; }
@@ -147,7 +147,17 @@
     'mold-breaker': [4, 'ignora as habilidades defensivas do alvo'], 'teravolt': [4, 'ignora as habilidades defensivas do alvo'], 'turboblaze': [4, 'ignora as habilidades defensivas do alvo'],
     'steelworker': [4, 'golpes de Aço ×1,5'], 'steely-spirit': [4, 'golpes de Aço ×1,5'], 'dragons-maw': [4, 'golpes de Dragão ×1,5'],
     'transistor': [4, 'golpes Elétrico ×1,3'], 'rocky-payload': [4, 'golpes de Pedra ×1,5'], 'water-bubble': [8, 'golpes de Água ×2; Fogo recebido ×0,5'],
-    'orichalcum-pulse': [6, 'Ataque ×1,33'], 'hadron-engine': [6, 'Atq. Esp. ×1,33'],
+    'orichalcum-pulse': [7, 'ao entrar: sol por 5 turnos; com sol, Ataque ×1,33'], 'hadron-engine': [6, 'Atq. Esp. ×1,33'],
+    'drought': [5, 'ao entrar: sol por 5 turnos (Fogo ×1,5, Água ×0,5)'], 'drizzle': [5, 'ao entrar: chuva por 5 turnos (Água ×1,5, Fogo ×0,5)'],
+    'sand-stream': [4, 'ao entrar: tempestade de areia por 5 turnos (fere 1/16 por turno quem não é Pedra, Terra ou Aço; Pedra com Def. Esp. ×1,5)'],
+    'snow-warning': [4, 'ao entrar: neve por 5 turnos (Gelo com Defesa ×1,5)'], 'sand-spit': [3, 'quando é atingido: tempestade de areia por 5 turnos'],
+    'swift-swim': [2, 'com chuva, Velocidade ×2'], 'chlorophyll': [2, 'com sol, Velocidade ×2'], 'sand-rush': [2, 'com areia, Velocidade ×2; imune à areia'],
+    'slush-rush': [2, 'com neve, Velocidade ×2'], 'solar-power': [2, 'com sol, Atq. Esp. ×1,5, mas perde 1/8 do HP por turno'],
+    'sand-force': [2, 'com areia, golpes de Pedra, Terra e Aço ×1,3; imune à areia'], 'sand-veil': [1, 'com areia, o adversário acerta menos (precisão ×0,8); imune à areia'],
+    'snow-cloak': [1, 'com neve, o adversário acerta menos (precisão ×0,8)'], 'rain-dish': [1, 'com chuva, recupera 1/16 do HP por turno'],
+    'ice-body': [1, 'com neve, recupera 1/16 do HP por turno'], 'flower-gift': [2, 'com sol, Ataque e Def. Esp. ×1,5'],
+    'protosynthesis': [3, 'com sol, o melhor atributo ×1,3 (Velocidade ×1,5)'], 'overcoat': [1, 'imune ao dano da areia'],
+    'cloud-nine': [2, 'anula o clima enquanto está em campo'], 'air-lock': [2, 'anula o clima enquanto está em campo'],
     'fairy-aura': [4, 'golpes de Fada ×1,33 (para os dois lados)'], 'dark-aura': [4, 'golpes Sombrio ×1,33 (para os dois lados)'],
     'sword-of-ruin': [5, 'Defesa do adversário ×0,75'], 'beads-of-ruin': [5, 'Def. Esp. do adversário ×0,75'],
     'tablets-of-ruin': [5, 'Ataque do adversário ×0,75'], 'vessel-of-ruin': [5, 'Atq. Esp. do adversário ×0,75'],
@@ -175,7 +185,7 @@
     'battle-armor': [2, 'não sofre golpes críticos'], 'shell-armor': [2, 'não sofre golpes críticos'],
     'levitate': [5, 'imune a golpes de Terra'], 'flash-fire': [5, 'imune a Fogo; depois disso, os golpes de Fogo dele ×1,5'],
     'water-absorb': [5, 'imune a Água e recupera 1/4 do HP'], 'volt-absorb': [5, 'imune a Elétrico e recupera 1/4 do HP'],
-    'dry-skin': [3, 'imune a Água (recupera 1/4 do HP); Fogo recebido ×1,25'], 'earth-eater': [5, 'imune a Terra e recupera 1/4 do HP'],
+    'dry-skin': [3, 'imune a Água (recupera 1/4 do HP); Fogo recebido ×1,25; com chuva recupera 1/8 por turno, com sol perde 1/8'], 'earth-eater': [5, 'imune a Terra e recupera 1/4 do HP'],
     'lightning-rod': [5, 'imune a Elétrico; Atq. Esp. +1'], 'storm-drain': [5, 'imune a Água; Atq. Esp. +1'],
     'motor-drive': [5, 'imune a Elétrico; Velocidade +1'], 'sap-sipper': [5, 'imune a Planta; Ataque +1'], 'well-baked-body': [5, 'imune a Fogo; Defesa +2'],
     'wonder-guard': [8, 'só os golpes super efetivos lhe acertam'], 'bulletproof': [3, 'imune a bombas e esferas'], 'soundproof': [3, 'imune a golpes sonoros'],
@@ -236,6 +246,61 @@
   var BOMBA = /ball|bomb|bullet|focus blast|pollen puff|beak blast|octazooka|zap cannon|aura sphere/i;
   function secundario(g) { return !!(g.ef && g.ef[1] < 100); }
 
+  /* ---------- clima: sol, chuva, areia e neve, 5 turnos (B.campo, partilhado pelos lutadores dos dois lados) ---------- */
+  var CLIMA_DE = { drought: 'sol', 'orichalcum-pulse': 'sol', drizzle: 'chuva', 'sand-stream': 'areia', 'snow-warning': 'neve' };
+  var NOME_CLIMA = { sol: '☀️ Sol forte', chuva: '🌧️ Chuva', areia: '🌪️ Tempestade de areia', neve: '❄️ Neve' };
+  var TXT_CLIMA = { sol: 'O sol ficou forte!', chuva: 'Começou a chover!', areia: 'Levantou-se uma tempestade de areia!', neve: 'Começou a nevar!' };
+  var FIM_CLIMA = { sol: 'O sol voltou ao normal.', chuva: 'A chuva parou.', areia: 'A tempestade de areia acalmou.', neve: 'Parou de nevar.' };
+  var CORRE = { 'swift-swim': 'chuva', chlorophyll: 'sol', 'sand-rush': 'areia', 'slush-rush': 'neve' };
+  var BOLA = { sol: 'fire', chuva: 'water', areia: 'rock', neve: 'ice' };
+  var TEMPESTADE = /^(Thunder|Hurricane|Bleakwind Storm|Wildbolt Storm|Sandsear Storm)$/;
+  function ligarCampo(B, c) {
+    B.campo = { clima: (c && c.clima) || null, turnos: (c && c.turnos) || 0, B: B };
+    ['j', 'o'].forEach(function (l) { B[l].time.forEach(function (m) { m.campo = B.campo; }); });
+    return B;
+  }
+  /* clima em vigor para m ('' se não há, ou se Cloud Nine / Air Lock está em campo) */
+  function clima(m) {
+    var c = m && m.campo; if (!c || !c.clima) { return ''; }
+    var B = c.B;
+    if (B && ['j', 'o'].some(function (l) { var x = ativo(B[l]), h = hab(x); return x.hp > 0 && (h === 'cloud-nine' || h === 'air-lock'); })) { return ''; }
+    return c.clima;
+  }
+  function mudarClima(m, tipo, P) {
+    var c = m.campo; if (!c || c.clima === tipo) { return false; }
+    c.clima = tipo; c.turnos = 5; P.push({ tipo: 'txt', txt: TXT_CLIMA[tipo] }); return true;
+  }
+  function multClima(a, g, t) {
+    var c = clima(a), m = 1;
+    if (c === 'sol') { m *= t === 'fire' ? 1.5 : t === 'water' ? 0.5 : 1; }
+    if (c === 'chuva') { m *= t === 'water' ? 1.5 : t === 'fire' ? 0.5 : 1; }
+    if (c === 'areia' && hab(a) === 'sand-force' && (t === 'rock' || t === 'ground' || t === 'steel')) { m *= 1.3; }
+    return m;
+  }
+  function melhorAtr(m) { return ['atk', 'def', 'spa', 'spd', 'spe'].reduce(function (x, y) { return m.st[y] > m.st[x] ? y : x; }, 'atk'); }
+  function imuneAreia(m) {
+    var h = hab(m);
+    return m.p.t.some(function (t) { return t === 'rock' || t === 'ground' || t === 'steel'; }) || h === 'sand-veil' || h === 'sand-rush' || h === 'sand-force' || h === 'overcoat' || h === 'magic-guard';
+  }
+  /* fim do turno: dano e cura do clima, pela ordem dos lados, e contagem dos turnos */
+  function fimTurnoClima(B, lados) {
+    var P = [], c = B.campo; if (!c || !c.clima) { return P; }
+    var cl = clima(ativo(B.j));
+    if (cl) {
+      lados.forEach(function (l) {
+        var m = ativo(B[l]), h = hab(m), nome = `<b>${esc(m.p.nome)}</b>`;
+        if (m.hp <= 0) { return; }
+        if (cl === 'areia' && !imuneAreia(m)) { mexerHp(m, -Math.max(1, Math.floor(m.hpMax / 16)), nome + ' foi atingido pela areia e perdeu {x} HP.', P); }
+        if (((cl === 'chuva' && h === 'rain-dish') || (cl === 'neve' && h === 'ice-body')) && m.hp < m.hpMax) { anunciar(m, P); mexerHp(m, Math.max(1, Math.floor(m.hpMax / 16)), nome + ' recuperou {x} HP.', P); }
+        if (h === 'dry-skin' && cl === 'chuva' && m.hp < m.hpMax) { anunciar(m, P); mexerHp(m, Math.max(1, Math.floor(m.hpMax / 8)), nome + ' recuperou {x} HP.', P); }
+        if ((h === 'dry-skin' || h === 'solar-power') && cl === 'sol' && m.hp > 1) { anunciar(m, P); mexerHp(m, -Math.max(1, Math.floor(m.hpMax / 8)), nome + ' perdeu {x} HP com o sol.', P); }
+      });
+    }
+    c.turnos--;
+    if (c.turnos <= 0) { P.push({ tipo: 'txt', txt: FIM_CLIMA[c.clima] }); c.clima = null; c.turnos = 0; }
+    return P;
+  }
+
   /* ---------- lutador ---------- */
   function zeroEst() { return { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }; }
   /* cfg (opcional): { nat: índice da nature, hab: posição da habilidade na lista do Pokémon } */
@@ -265,10 +330,19 @@
     if (outro && hab(outro) === 'unaware') { s = 0; }
     var v = m.st[k] * multEst(s);
     if ((k === 'atk' || k === 'spe') && lentoAtivo(m)) { v *= 0.5; }
+    var cl = clima(m);
+    if (cl) {
+      if (k === 'spe' && CORRE[h] === cl) { v *= 2; }
+      if (!atacando && k === 'def' && cl === 'neve' && m.p.t.indexOf('ice') >= 0) { v *= 1.5; }
+      if (!atacando && k === 'spd' && cl === 'areia' && m.p.t.indexOf('rock') >= 0) { v *= 1.5; }
+      if (cl === 'sol' && h === 'flower-gift' && ((atacando && k === 'atk') || (!atacando && k === 'spd'))) { v *= 1.5; }
+      if (cl === 'sol' && atacando && k === 'spa' && h === 'solar-power') { v *= 1.5; }
+      if (cl === 'sol' && h === 'protosynthesis' && melhorAtr(m) === k) { v *= k === 'spe' ? 1.5 : 1.3; }
+    }
     if (atacando) {
       if (k === 'atk' && (h === 'huge-power' || h === 'pure-power')) { v *= 2; }
       if (k === 'atk' && h === 'hustle') { v *= 1.5; }
-      if ((k === 'atk' && h === 'orichalcum-pulse') || (k === 'spa' && h === 'hadron-engine')) { v *= 4 / 3; }
+      if ((k === 'atk' && h === 'orichalcum-pulse' && cl === 'sol') || (k === 'spa' && h === 'hadron-engine')) { v *= 4 / 3; }
       if (h === 'defeatist' && m.hp * 2 < m.hpMax) { v *= 0.5; }
     }
     if (outro && RUINA[k] && hab(outro) === RUINA[k] && h !== RUINA[k]) { v *= 0.75; }
@@ -309,6 +383,8 @@
     if (h === 'trace' && foe && foe.hp > 0 && hab(foe) && !NAO_COPIA[hab(foe)]) {
       anunciar(m, P); m.hab = hab(foe); P.push({ tipo: 'txt', txt: `<b>${esc(m.p.nome)}</b> copiou ${esc(nomeHab(m.hab))}!` }); h = m.hab;
     }
+    if (CLIMA_DE[h] && m.campo && m.campo.clima !== CLIMA_DE[h]) { anunciar(m, P); mudarClima(m, CLIMA_DE[h], P); }
+    if ((h === 'cloud-nine' || h === 'air-lock') && m.campo && m.campo.clima) { anunciar(m, P); P.push({ tipo: 'txt', txt: 'Os efeitos do clima desapareceram.' }); }
     if (h === 'intimidate' && foe && foe.hp > 0) {
       anunciar(m, P);
       var hf = hab(foe);
@@ -377,11 +453,12 @@
 
   /* ---------- dano ---------- */
   function efTotal(tipo, alvo) { return K.efTotal(tipo, alvo.t); }
-  function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.pw; }
+  function poderDe(a, g) { return g.esp === 'hp' ? Math.max(1, Math.floor(150 * a.hp / a.hpMax)) : g.nome === 'Weather Ball' && clima(a) ? 100 : g.pw; }
   /* tipo do golpe depois das habilidades (Pixilate, Liquid Voice...) */
   function tipoDe(a, g) {
     if (g.semTipo || g.max) { return g.t; }
     var h = hab(a);
+    if (g.nome === 'Weather Ball' && clima(a)) { return BOLA[clima(a)]; }
     if (PELE[h] && g.t === 'normal') { return PELE[h]; }
     if (h === 'liquid-voice' && SOM.test(g.nome)) { return 'water'; }
     return g.t;
@@ -452,7 +529,10 @@
   }
   function precisaoDe(a, d, g) {
     if (g.ac === 0 || hab(a) === 'no-guard' || hab(d) === 'no-guard') { return 0; }
-    var h = hab(a), ac = g.ac;
+    var h = hab(a), ac = g.ac, cl = clima(a), hd = habAlvo(a, d);
+    if ((cl === 'chuva' && TEMPESTADE.test(g.nome)) || (cl === 'neve' && g.nome === 'Blizzard')) { return 0; }
+    if (cl === 'sol' && (g.nome === 'Thunder' || g.nome === 'Hurricane')) { ac = 50; }
+    if ((cl === 'areia' && hd === 'sand-veil') || (cl === 'neve' && hd === 'snow-cloak')) { ac *= 0.8; }
     if (h === 'compound-eyes') { ac *= 1.3; }
     if (h === 'victory-star') { ac *= 1.1; }
     if (h === 'hustle' && g.c === 'F') { ac *= 0.8; }
@@ -473,7 +553,7 @@
       var r = rng();
       acertos = hab(a) === 'skill-link' ? g.hmax : g.hmin === 2 && g.hmax === 5 ? (r < 0.35 ? 2 : r < 0.7 ? 3 : r < 0.85 ? 4 : 5) : g.hmin + Math.floor(r * (g.hmax - g.hmin + 1));
     }
-    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao * multHab(a, d, g, t, e, crit))) * acertos;
+    var dano = e === 0 ? 0 : Math.max(1, Math.floor(danoBase(a, d, g, crit) * stab * e * (crit ? 1.5 : 1) * variacao * multHab(a, d, g, t, e, crit) * multClima(a, g, t))) * acertos;
     var res = { erro: false, dano: dano, ef: e, crit: crit, acertos: acertos, t: t };
     // Disguise / Ice Face: o primeiro golpe não faz (quase) dano; Sturdy: aguenta com 1 HP
     if (dano > 0 && !d.disfarce && (hd === 'disguise' || (hd === 'ice-face' && g.c === 'F'))) {
@@ -487,7 +567,7 @@
     var h = hab(a), nc = Math.min(2, (g.ca || 0) + (h === 'super-luck' ? 1 : 0)), hd = habAlvo(a, d);
     var pc = hd === 'battle-armor' || hd === 'shell-armor' ? 0 : g.ca === 2 ? 1 : CHANCE_CRIT[nc], critMedio = 1 + pc * (h === 'sniper' ? 1.25 : 0.5);
     var ac = precisaoDe(a, d, g), hits = g.hmax > 1 && h === 'skill-link' ? g.hmax : acertosMedios(g);
-    return danoBase(a, d, g, false) * stabDe(a, g, t) * e * (ac === 0 ? 1 : Math.min(1, ac / 100)) * hits * critMedio * 0.925 * multHab(a, d, g, t, e, false);
+    return danoBase(a, d, g, false) * stabDe(a, g, t) * e * (ac === 0 ? 1 : Math.min(1, ac / 100)) * hits * critMedio * 0.925 * multHab(a, d, g, t, e, false) * multClima(a, g, t);
   }
   /* dreno (cura quem atacou; Liquid Ooze fere) e recuo (fere quem atacou, sem o derrubar) */
   function efeitoDreno(a, d, g, causado, P) {
@@ -543,6 +623,7 @@
       if (hd === 'anger-point' && r.crit) { anunciar(d, P); alterar(d, 'atk', 12, null, P); }
       if (hd === 'cotton-down' && a.hp > 0) { anunciar(d, P); alterar(a, 'spe', -1, d, P); }
     }
+    if (hd === 'sand-spit' && d.campo && d.campo.clima !== 'areia') { anunciar(d, P); mudarClima(d, 'areia', P); }
     if (a.hp > 0 && hab(a) !== 'magic-guard') {
       if (g.c === 'F' && (hd === 'rough-skin' || hd === 'iron-barbs')) { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 8)), `<b>${esc(a.p.nome)}</b> magoou-se e perdeu {x} HP.`, P); }
       if (d.hp <= 0 && g.c === 'F' && hd === 'aftermath') { anunciar(d, P); mexerHp(a, -Math.max(1, Math.floor(a.hpMax / 4)), `<b>${esc(a.p.nome)}</b> perdeu {x} HP.`, P); }
@@ -687,7 +768,7 @@
 
   /* ---------- simulação rápida (previsão, Simular ×1000 e calibração dos níveis) ---------- */
   function simular(idsJ, idsO, mvJ, mvO, exJ, exO) {
-    var B = { j: novoLado(idsJ, mvJ || S.mv.j, null, exJ || (mvJ ? null : extrasDo('j'))), o: novoLado(idsO, mvO || S.mv.o, null, exO || (mvO ? null : extrasDo('o'))) }, turnos = 0;
+    var B = ligarCampo({ j: novoLado(idsJ, mvJ || S.mv.j, null, exJ || (mvJ ? null : extrasDo('j'))), o: novoLado(idsO, mvO || S.mv.o, null, exO || (mvO ? null : extrasDo('o'))) }), turnos = 0;
     aoEntrar(ativo(B.j), ativo(B.o), []); aoEntrar(ativo(B.o), ativo(B.j), []);
     while (vivos(B.j).length && vivos(B.o).length && turnos < 300) {
       turnos++;
@@ -709,7 +790,7 @@
           break;
         }
       }
-      fimTurnoLado(B.j); fimTurnoLado(B.o);
+      fimTurnoClima(B, ['j', 'o']); fimTurnoLado(B.j); fimTurnoLado(B.o);
     }
     return { venc: vivos(B.j).length ? 'j' : 'o', turnos: turnos };
   }
@@ -734,12 +815,12 @@
   }
   function fotoBatalha(B) {
     var lado = function (l) { return { ativo: l.ativo, transformou: !!l.transformou, time: l.time.map(fotoLutador) }; };
-    return { j: lado(B.j), o: lado(B.o) };
+    return { j: lado(B.j), o: lado(B.o), campo: B.campo ? { clima: B.campo.clima, turnos: B.campo.turnos } : null };
   }
   function batalhaDaFoto(f) {
     var lado = function (l) { return { ativo: l.ativo, transformou: l.transformou, time: l.time.map(lutadorDaFoto) }; };
     var B = { j: lado(f.j), o: lado(f.o) };
-    return B.j.time.every(Boolean) && B.o.time.every(Boolean) ? B : null;
+    return B.j.time.every(Boolean) && B.o.time.every(Boolean) ? ligarCampo(B, f.campo) : null;
   }
   if (!window.__arena) {
     var salvo = K.restaurar('arena', 72);
@@ -1156,7 +1237,8 @@
     return `<div class='pk-palco bat' id='ar-palco'>
       <div class='campo campo-o' style='--c:${corTipo(to)}'>${K.particulas(to, 18, 3)}</div>
       <div class='campo campo-j' style='--c:${corTipo(tj)}'>${K.particulas(tj, 18, 11)}</div>
-      <div class='campo-luz'></div><div class='diag'></div>
+      <div class='campo-luz'></div><div class='clima-fx ${B.campo && B.campo.clima ? B.campo.clima : ''}' id='ar-clima-fx'></div><div class='diag'></div>
+      <div class='clima-tag' id='ar-clima'>${climaHtml()}</div>
       <div class='vs'><span>VS</span></div>
       <div class='plat plat-o' style='--c:${corTipo(to)}'></div><div class='plat plat-j' style='--c:${corTipo(tj)}'></div>
       <div class='mon mon-o${foe.gmax > 0 ? ' gmax' : ''}' id='mon-o'>${K.img([K.URL.gif(foe.p.id), K.URL.home(foe.p.id)], 'spr')}</div>
@@ -1352,7 +1434,14 @@
   }
   /* mostra os passos das regras (habilidades, atributos, HP) um a um */
   function ladoDe(m) { return S.B.j.time.indexOf(m) >= 0 ? 'j' : 'o'; }
+  function climaHtml() {
+    var c = S.B && S.B.campo; if (!c || !c.clima) { return ''; }
+    return `<span>${NOME_CLIMA[c.clima]} · ${c.turnos} ${c.turnos === 1 ? 'turno' : 'turnos'}${clima(ativo(S.B.j)) ? '' : ' · anulado'}</span>`;
+  }
   function atualizarHud() {
+    var cx = $('ar-clima'), fx = $('ar-clima-fx');
+    if (cx) { cx.innerHTML = climaHtml(); }
+    if (fx) { fx.className = 'clima-fx ' + ((S.B.campo && S.B.campo.clima) || ''); }
     var h = $('ar-palco'); if (!h) { return; }
     var est = h.querySelectorAll('.hud-est');
     if (est[0]) { est[0].innerHTML = estHtml(ativo(S.B.j)); } if (est[1]) { est[1].innerHTML = estHtml(ativo(S.B.o)); }
@@ -1375,7 +1464,7 @@
       } else if (x.tipo === 'hp') {
         textoFx((x.d > 0 ? '+' : '') + x.d, x.d > 0 ? 'num cura' : 'num', lado); registrar(x.txt); mensagem(x.txt);
         if (ativo(S.B[lado]) === x.m) { await animarHp(lado, x.m); } else { await esperar(500); }
-      } else { registrar(x.txt); mensagem(x.txt); await esperar(600); }
+      } else { registrar(x.txt); mensagem(x.txt); atualizarHud(); await esperar(600); }
     }
   }
   async function animarEvolucao(lado, antes, m) {
@@ -1464,6 +1553,7 @@
       var ko = await usarGolpe(lado, ac.idx);
       if (ko) { if (await aposDesmaio(lado === 'j' ? 'o' : 'j')) { return; } break; }
     }
+    await mostrarPassos(fimTurnoClima(B, ['j', 'o']));
     for (var lg of ['j', 'o']) {
       var mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
@@ -1480,7 +1570,7 @@
   }
   async function iniciarBatalha(online) {
     if (!online && !Object.keys(itensDoTime('o')).length) { S.itens.o = itensAuto(S.time.o); }
-    S.B = { j: novoLado(S.time.j, S.mv.j, itensDoTime('j'), extrasDo('j')), o: novoLado(S.time.o, S.mv.o, itensDoTime('o'), extrasDo('o')) };
+    S.B = ligarCampo({ j: novoLado(S.time.j, S.mv.j, itensDoTime('j'), extrasDo('j')), o: novoLado(S.time.o, S.mv.o, itensDoTime('o'), extrasDo('o')) });
     if (online) { S.B.online = true; S.B.host = online.host; }
     S.log = ['A batalha começou!']; S.fim = null; S.escolha = null; S.sim = null; S.ocupado = true;
     S.msg = 'A batalha vai começar!'; S.tela = 'batalha'; render();
@@ -1539,6 +1629,7 @@
       var ko = await usarGolpe(lado, ac.idx);
       if (ko) { if (await aposDesmaioOnline(lado === 'j' ? 'o' : 'j', n)) { fecharTurno(n); return; } break; }
     }
+    await mostrarPassos(fimTurnoClima(B, lados));
     for (var g = 0; g < 2; g++) {
       var lg = lados[g], mg = ativo(B[lg]);
       if (mg.gmax > 0 && mg.hp > 0) { mg.gmax--; if (mg.gmax === 0) { await reverterGmax(lg); } }
@@ -1552,7 +1643,7 @@
   function fecharTurno(n) {
     var p = S.on.p, B = S.B, resumo = ladosCanonicos().map(function (l) {
       return B[l].ativo + ':' + B[l].time.map(function (m) { return m.hp + '/' + m.pp.join('.') + '/' + m.p.id + '/' + m.nat; }).join(',') + ':' + JSON.stringify(ativo(B[l]).est) + ':' + hab(ativo(B[l]));
-    }).join('|');
+    }).join('|') + '|' + (B.campo.clima || '-') + B.campo.turnos;
     p.turno = n + 1; p.syncEu[n] = resumo;
     NET.enviar({ t: 'sync', n: n, h: resumo });
     conferirSync(n);
@@ -1863,7 +1954,7 @@
   };
   if (!window.__arenaResize) { window.__arenaResize = true; window.addEventListener('resize', function () { K.escala(raiz); }); }
 
-  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
+  window.__arenaApi = { calibrar: calibrar, nivelDe: nivelDe, nivelFormula: nivelFormula, ehFormaEspecial: ehFormaEspecial, simular: simular, golpesDe: golpesDe, statusDe: statusDe, NATURES: NATURES, natAuto: natAuto, classeNat: classeNat, habsDe: habsDe, habAuto: habAuto, HAB_INFO: HAB_INFO, calcular: calcular, lutador: lutador, ligarCampo: ligarCampo, aoEntrar: aoEntrar, fimTurnoClima: fimTurnoClima, atributo: atributo, esperado: esperado, clima: clima, opcoesTransformar: opcoesTransformar, aplicarForma: aplicarForma, desfazerGmax: desfazerGmax, novoLado: novoLado };
   // link de convite: arena.html#sala-ABC123 entra direto na sala
   var codigoLink = codigoDoLink();
   var codigoRetomar = codigoLink || (NET && NET.configurado ? NET.salaGuardada() : '');
